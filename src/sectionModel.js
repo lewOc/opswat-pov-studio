@@ -145,7 +145,15 @@ export const sectionTemplates = [
     exportKey: "sections.successCriteria",
     purpose: "Define measurable criteria, validation methods, thresholds, and verdicts.",
     requiredFields: ["Priority", "Success Criterion", "Validation Method", "Threshold / Target"],
-    columns: ["Priority", "Success Criterion", "Validation Method", "Threshold / Target", "Verdict"]
+    columns: ["Priority", "Success Criterion", "Validation Method", "Threshold / Target", "Verdict"],
+    ai: {
+      mode: "table",
+      target: "rows",
+      maxRows: 5,
+      instructions:
+        "Generate concise, measurable PoV success criteria as table rows. Link criteria to the captured use cases, products, and customer outcomes. Keep each cell short and leave Verdict blank for later review.",
+      outputColumns: ["Priority", "Success Criterion", "Validation Method", "Threshold / Target", "Verdict"]
+    }
   },
   {
     group: "validate",
@@ -169,7 +177,15 @@ export const sectionTemplates = [
     exportKey: "sections.useCases",
     purpose: "List the PoV validation scenarios and associated products.",
     requiredFields: ["Use Case", "Description", "Product(s)"],
-    columns: ["ID", "Use Case", "Description", "Product(s)"]
+    columns: ["ID", "Use Case", "Description", "Product(s)"],
+    ai: {
+      mode: "table",
+      target: "rows",
+      maxRows: 5,
+      instructions:
+        "Generate concise PoV validation use cases as table rows. Each row should describe a concrete proof-of-value task, not a broad product capability. Keep descriptions short and action-oriented.",
+      outputColumns: ["ID", "Use Case", "Description", "Product(s)"]
+    }
   },
   {
     group: "validate",
@@ -336,6 +352,7 @@ export const conciseGenerationGuidance = {
   rules: [
     "Only write content needed for the selected PoV section.",
     "Prefer short bullets or compact table entries over long prose.",
+    "When the section is a table, return table rows that match the requested columns.",
     "Focus on the proof-of-value task, validation steps, success measures, and customer context.",
     "Avoid broad marketing copy, long product background, and repeated context already captured elsewhere.",
     "Do not generate a full-document narrative when a single section is requested."
@@ -497,6 +514,12 @@ export function getAiReadiness(section, povContext) {
   }
   if (section.template.exportKey === "sections.customerEnvironment" && !povContext.challenges.trim() && !section.data.rows.some((row) => row.Details?.trim())) {
     return { ready: false, reason: "Add environment details or business context before drafting the overview." };
+  }
+  if (section.template.exportKey === "sections.useCases" && !povContext.useCases.trim() && !povContext.challenges.trim()) {
+    return { ready: false, reason: "Add use cases or business challenges before generating validation rows." };
+  }
+  if (section.template.exportKey === "sections.successCriteria" && !povContext.useCases.trim() && !povContext.challenges.trim()) {
+    return { ready: false, reason: "Add use cases or business challenges before generating success criteria." };
   }
   return { ready: true, reason: "Ready to generate this section." };
 }

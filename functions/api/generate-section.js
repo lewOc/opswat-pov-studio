@@ -24,6 +24,7 @@ const conciseGenerationGuidance = {
   rules: [
     "Only write content needed for the selected PoV section.",
     "Prefer short bullets or compact table entries over long prose.",
+    "When the section is a table, return table rows that match the requested columns.",
     "Focus on the proof-of-value task, validation steps, success measures, and customer context.",
     "Avoid broad marketing copy, long product background, and repeated context already captured elsewhere.",
     "Do not generate a full-document narrative when a single section is requested."
@@ -81,10 +82,13 @@ export async function onRequestPost({ request, env }) {
     );
   }
 
+  const maxRows = Math.max(1, Math.min(Number(body.section.ai.maxRows || 6), 8));
+  const rows = Array.isArray(payload.rows) ? payload.rows.slice(0, maxRows) : [];
+
   return json({
     target: payload.target || body.section.ai.target,
     draft: payload.draft || "",
-    rows: Array.isArray(payload.rows) ? payload.rows : [],
+    rows,
     citations: Array.isArray(payload.citations) ? payload.citations : [],
     sources: payload.sources || { rag: [] }
   });

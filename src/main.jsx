@@ -139,8 +139,37 @@ function applyGeneratedSection(sectionId, payload, updateSectionData) {
         citations: payload.citations || []
       };
     }
+    if (payload.target === "rows" && Array.isArray(payload.rows)) {
+      const columns = Object.keys(current.rows?.[0] || payload.rows?.[0] || {});
+      const rows = normalizeGeneratedRows(payload.rows, columns);
+      return {
+        ...current,
+        rows: rows.length ? rows : current.rows,
+        citations: payload.citations || []
+      };
+    }
     return current;
   });
+}
+
+function normalizeGeneratedRows(rows, columns) {
+  if (!Array.isArray(rows) || !columns.length) return [];
+  return rows
+    .map((row) => {
+      if (Array.isArray(row)) {
+        return Object.fromEntries(columns.map((column, index) => [column, compactText(row[index], 180)]));
+      }
+      if (!row || typeof row !== "object") return null;
+      const entries = Object.entries(row);
+      return Object.fromEntries(
+        columns.map((column) => {
+          const direct = row[column];
+          const loose = entries.find(([key]) => key.toLowerCase().replace(/[^a-z0-9]/g, "") === column.toLowerCase().replace(/[^a-z0-9]/g, ""));
+          return [column, compactText(direct ?? loose?.[1] ?? "", 180)];
+        })
+      );
+    })
+    .filter((row) => row && Object.values(row).some((value) => String(value || "").trim()));
 }
 
 function compactText(value, maxLength = 120) {
