@@ -1707,6 +1707,86 @@ button:disabled {
   -webkit-line-clamp: 3;
 }
 
+.product-knowledge-card {
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: #ffffff;
+  padding: 12px;
+  display: grid;
+  gap: 10px;
+}
+
+.product-knowledge-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.product-knowledge-head span {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--navy);
+  font-size: 13px;
+  font-weight: 760;
+}
+
+.product-knowledge-list {
+  display: grid;
+  gap: 8px;
+}
+
+.product-knowledge-list article {
+  border-top: 1px solid #e6ebf3;
+  padding-top: 8px;
+  display: grid;
+  gap: 3px;
+}
+
+.product-knowledge-list strong {
+  color: #293654;
+  font-size: 12px;
+}
+
+.product-knowledge-list p,
+.product-knowledge-empty,
+.product-knowledge-message {
+  margin: 0;
+  color: #52617e;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.product-knowledge-list p {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.product-knowledge-list span {
+  color: #72809b;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.product-knowledge-message {
+  border: 1px solid #cfe8da;
+  border-radius: 4px;
+  background: #f3f8f5;
+  color: #27583a;
+  padding: 8px 10px;
+}
+
+.product-knowledge-message.error {
+  border-color: #ffd0cc;
+  background: #fff4f2;
+  color: #9f2f28;
+}
+
 .input-shell,
 .chip-shell,
 .field select {

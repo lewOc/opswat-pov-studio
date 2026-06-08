@@ -330,6 +330,18 @@ export const emptyPovContext = {
   tone: ""
 };
 
+export const conciseGenerationGuidance = {
+  style: "concise, practical, and section-specific",
+  maxWords: 140,
+  rules: [
+    "Only write content needed for the selected PoV section.",
+    "Prefer short bullets or compact table entries over long prose.",
+    "Focus on the proof-of-value task, validation steps, success measures, and customer context.",
+    "Avoid broad marketing copy, long product background, and repeated context already captured elsewhere.",
+    "Do not generate a full-document narrative when a single section is requested."
+  ]
+};
+
 const emptyRow = (columns) => Object.fromEntries(columns.map((column) => [column, ""]));
 
 export function templateById(templateId) {

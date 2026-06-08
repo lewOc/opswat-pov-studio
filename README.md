@@ -21,6 +21,7 @@ Open `http://127.0.0.1:5173/`.
 - Section library and document outline
 - RAG-oriented AI draft assistant UI
 - Section generation through a proxied backend endpoint
+- Product Knowledge recommendations for concise product scope suggestions
 - OPSWAT Word template export for structured PoV sections
 - Responsive layout for desktop and narrow preview panes
 
@@ -51,6 +52,16 @@ Required environment variables for generation:
 ```bash
 RAG_API_BASE_URL=https://your-rag-service.example.com
 RAG_ACCESS_TOKEN=optional-shared-rag-token
+```
+
+Product fit suggestions call `/api/product-knowledge`, which proxies selected
+Product Knowledge API endpoints from Cloudflare Pages.
+
+Required environment variables for product knowledge:
+
+```bash
+PRODUCT_KNOWLEDGE_API_BASE_URL=https://your-product-knowledge-service.example.com
+PRODUCT_KNOWLEDGE_ACCESS_TOKEN=optional-shared-product-knowledge-token
 ```
 
 The RAG backend endpoint used by PoV Studio is:

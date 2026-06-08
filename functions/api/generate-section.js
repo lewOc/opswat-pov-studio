@@ -18,6 +18,18 @@ async function readUpstreamResponse(response) {
   }
 }
 
+const conciseGenerationGuidance = {
+  style: "concise, practical, and section-specific",
+  maxWords: 140,
+  rules: [
+    "Only write content needed for the selected PoV section.",
+    "Prefer short bullets or compact table entries over long prose.",
+    "Focus on the proof-of-value task, validation steps, success measures, and customer context.",
+    "Avoid broad marketing copy, long product background, and repeated context already captured elsewhere.",
+    "Do not generate a full-document narrative when a single section is requested."
+  ]
+};
+
 export async function onRequestPost({ request, env }) {
   const ragBaseUrl = normalizeBaseUrl(env.RAG_API_BASE_URL);
   if (!ragBaseUrl) {
@@ -49,7 +61,13 @@ export async function onRequestPost({ request, env }) {
     upstream = await fetch(`${ragBaseUrl}/api/pov/section-draft`, {
       method: "POST",
       headers,
-      body: JSON.stringify(body)
+      body: JSON.stringify({
+        ...body,
+        generationGuidance: {
+          ...conciseGenerationGuidance,
+          ...(body.generationGuidance || {})
+        }
+      })
     });
   } catch (error) {
     return json({ error: `Could not reach RAG backend: ${error.message}` }, 502);

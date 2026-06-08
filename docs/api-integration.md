@@ -20,6 +20,16 @@ Best fit:
 Boundary: product documentation and capability knowledge only. It should not
 research accounts, claim delivery experience, or create diagrams.
 
+Current PoV Studio integration:
+
+- `/api/product-knowledge` proxies selected Product Knowledge API actions.
+- The right rail can request a concise product-fit shortlist from the captured
+  customer context.
+- Recommendations can populate `OPSWAT Products in Scope` with short purpose
+  descriptions only.
+- Section generation receives a compact product summary as context, not as a
+  command to expand every section into product marketing copy.
+
 ## Diagram API
 
 Repository: `lewOc/opswat-diagram-api`

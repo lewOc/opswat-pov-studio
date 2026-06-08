@@ -44,6 +44,7 @@ import usbBlueIcon from "./assets/other-icons/usb_blue.png";
 import { exportSelectedSectionsDocx } from "./docxExport";
 import {
   attachSectionTemplate,
+  conciseGenerationGuidance,
   createSection as createSectionModel,
   emptyPovContext,
   getAiPlan,
@@ -52,7 +53,8 @@ import {
   libraryGroups,
   sectionTemplates,
   serializeSection,
-  serializeSectionForStorage
+  serializeSectionForStorage,
+  splitPovList
 } from "./sectionModel";
 import "./styles.css";
 
@@ -141,6 +143,77 @@ function applyGeneratedSection(sectionId, payload, updateSectionData) {
   });
 }
 
+function compactText(value, maxLength = 120) {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength - 1).trim()}...`;
+}
+
+function buildProductFitPayload(povContext) {
+  const problem = [povContext.challenges, povContext.useCases].filter(Boolean).join("\n");
+  const workflow = povContext.useCases || povContext.challenges || povContext.products;
+  const constraints = splitPovList([povContext.products, povContext.challenges].filter(Boolean).join(", "));
+
+  return {
+    problem,
+    industry: povContext.industry,
+    workflow,
+    compliance_drivers: splitPovList(povContext.compliance),
+    constraints,
+    top_k: 4,
+    max_evidence: 2
+  };
+}
+
+function normalizeProductRecommendations(payload) {
+  const items = payload?.recommended_products || payload?.products || payload?.results || [];
+  return items
+    .map((item) => {
+      const evidence = Array.isArray(item.evidence) ? item.evidence : [];
+      const evidenceReason = evidence.find((entry) => entry.summary || entry.text || entry.content || entry.title);
+      return {
+        product: item.product || item.name || item.title || item.slug || "",
+        confidence: item.confidence || item.score || "",
+        reason: compactText(
+          item.reason ||
+            item.fit_reason ||
+            item.recommendation ||
+            item.summary ||
+            item.description ||
+            evidenceReason?.summary ||
+            evidenceReason?.text ||
+            evidenceReason?.content ||
+            "Potential fit based on the captured PoV context.",
+          130
+        ),
+        evidenceCount: evidence.length
+      };
+    })
+    .filter((item) => item.product);
+}
+
+function summarizeProductKnowledge(productKnowledge) {
+  const recommendations = productKnowledge?.recommendations || [];
+  return recommendations.slice(0, 4).map((item) => ({
+    product: item.product,
+    reason: item.reason,
+    confidence: item.confidence,
+    evidenceCount: item.evidenceCount
+  }));
+}
+
+async function readJsonResponse(response, fallbackError) {
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.includes("application/json")) {
+    return { error: fallbackError };
+  }
+  try {
+    return await response.json();
+  } catch {
+    return { error: fallbackError };
+  }
+}
+
 function App() {
   const savedDraft = useMemo(() => readSavedDraft(), []);
   const [documentStage, setDocumentStage] = useState(savedDraft?.documentStage || "start");
@@ -151,6 +224,9 @@ function App() {
   const [isDropActive, setIsDropActive] = useState(false);
   const [draggedSectionId, setDraggedSectionId] = useState(null);
   const [povContext, setPovContext] = useState({ ...emptyPovContext, ...(savedDraft?.povContext || {}) });
+  const [productKnowledge, setProductKnowledge] = useState(savedDraft?.productKnowledge || null);
+  const [isProductKnowledgeLoading, setIsProductKnowledgeLoading] = useState(false);
+  const [productKnowledgeMessage, setProductKnowledgeMessage] = useState("");
   const [isExporting, setIsExporting] = useState(false);
 
   const activeSection = sections.find((section) => section.id === activeSectionId) || null;
@@ -168,11 +244,12 @@ function App() {
   useEffect(() => {
     writeSavedDraft({
       documentStage,
+      productKnowledge,
       povContext,
       activeSectionId,
       sections: sections.map(serializeSectionForStorage)
     });
-  }, [activeSectionId, documentStage, povContext, sections]);
+  }, [activeSectionId, documentStage, productKnowledge, povContext, sections]);
 
   function addSection(sectionId, insertIndex = sections.length) {
     const template = hydratedTemplates.find((item) => item.section === sectionId);
@@ -265,6 +342,77 @@ function App() {
     setIsContextEditing(false);
   }
 
+  async function handleSuggestProductFit() {
+    if (isProductKnowledgeLoading) return;
+    setIsProductKnowledgeLoading(true);
+    setProductKnowledgeMessage("");
+    try {
+      const response = await fetch("/api/product-knowledge", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "productFit",
+          payload: buildProductFitPayload(povContext)
+        })
+      });
+      const payload = await readJsonResponse(response, "Product Knowledge API is not configured for this local environment.");
+      if (!response.ok) throw new Error(payload.error || "Product Knowledge lookup failed.");
+      const recommendations = normalizeProductRecommendations(payload);
+      setProductKnowledge({
+        generatedAt: new Date().toISOString(),
+        recommendations,
+        raw: payload
+      });
+      setProductKnowledgeMessage(
+        recommendations.length
+          ? `${recommendations.length} concise product recommendation(s) found.`
+          : "Product Knowledge returned no product recommendations for this context."
+      );
+    } catch (error) {
+      setProductKnowledgeMessage(error.message || "Product Knowledge API is unavailable.");
+    } finally {
+      setIsProductKnowledgeLoading(false);
+    }
+  }
+
+  function handleApplyProductKnowledge() {
+    const recommendations = productKnowledge?.recommendations || [];
+    if (!recommendations.length) return;
+    const template = hydratedTemplates.find((item) => item.exportKey === "sections.productsInScope");
+    if (!template) return;
+
+    const rows = recommendations.slice(0, 4).map((item) => ({
+      "Product / Module": item.product,
+      Version: "",
+      "Purpose / Description": item.reason
+    }));
+
+    setSections((current) => {
+      const existing = current.find((section) => section.template.exportKey === "sections.productsInScope");
+      if (existing) {
+        return current.map((section) =>
+          section.id === existing.id
+            ? {
+                ...section,
+                data: { ...section.data, rows },
+                reviewState: "In progress"
+              }
+            : section
+        );
+      }
+      const nextSection = attachSectionTemplate(createSectionModel(template, povContext), iconForTemplate);
+      return [
+        ...current,
+        {
+          ...nextSection,
+          data: { ...nextSection.data, rows },
+          reviewState: "In progress"
+        }
+      ];
+    });
+    setActiveSectionId(template.section);
+  }
+
   async function handleGenerateSection() {
     if (!activeSection || !canGenerateActiveSection || isGenerating) return;
     setIsGenerating(true);
@@ -276,10 +424,12 @@ function App() {
         body: JSON.stringify({
           section: serializeSection(activeSection),
           intake: povContext,
-          povContext
+          povContext,
+          productKnowledge: summarizeProductKnowledge(productKnowledge),
+          generationGuidance: conciseGenerationGuidance
         })
       });
-      const payload = await response.json();
+      const payload = await readJsonResponse(response, "AI generation is not configured for this local environment.");
       if (!response.ok) throw new Error(payload.error || "AI generation failed.");
       applyGeneratedSection(activeSection.id, payload, updateSectionData);
       setAssistantMessage(payload.citations?.length ? `Draft generated with ${payload.citations.length} retrieved source reference(s).` : "Draft generated.");
@@ -470,6 +620,13 @@ function App() {
             ) : (
               <ContextSummary intake={povContext} onEdit={() => setIsContextEditing(true)} />
             )}
+            <ProductKnowledgePanel
+              isLoading={isProductKnowledgeLoading}
+              message={productKnowledgeMessage}
+              onApply={handleApplyProductKnowledge}
+              onSuggest={handleSuggestProductFit}
+              recommendations={productKnowledge?.recommendations || []}
+            />
             <div className="assistant-copy">
               <strong>Generate selected section</strong>
               <span>{activeSection ? activeSection.title : "No section selected"}</span>
@@ -696,6 +853,46 @@ function ContextSummary({ intake, onEdit }) {
       ) : (
         <p className="context-empty">Add customer context before generating section content.</p>
       )}
+    </div>
+  );
+}
+
+function ProductKnowledgePanel({ isLoading, message, onApply, onSuggest, recommendations }) {
+  const hasRecommendations = recommendations.length > 0;
+
+  return (
+    <div className="product-knowledge-card">
+      <div className="product-knowledge-head">
+        <span>
+          <ShieldCheck size={17} />
+          Product Knowledge
+        </span>
+        <button className="secondary-button compact-text" disabled={isLoading} onClick={onSuggest}>
+          <Search size={15} />
+          {isLoading ? "Checking" : "Suggest"}
+        </button>
+      </div>
+      {hasRecommendations ? (
+        <div className="product-knowledge-list">
+          {recommendations.slice(0, 4).map((item) => (
+            <article key={item.product}>
+              <strong>{item.product}</strong>
+              <p>{item.reason}</p>
+              <span>
+                {item.confidence ? `Confidence ${item.confidence}` : "Recommended fit"}
+                {item.evidenceCount ? ` - ${item.evidenceCount} evidence source(s)` : ""}
+              </span>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <p className="product-knowledge-empty">Suggest concise product fit from the customer context before drafting product-led sections.</p>
+      )}
+      {message && <div className={`product-knowledge-message ${message.includes("failed") || message.includes("unavailable") || message.includes("not configured") ? "error" : ""}`}>{message}</div>}
+      <button className="outline-button" disabled={!hasRecommendations} onClick={onApply}>
+        <Plus size={16} />
+        Apply to Products in Scope
+      </button>
     </div>
   );
 }
