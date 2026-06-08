@@ -1,7 +1,5 @@
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { createRoot } from "react-dom/client";
-import JSZip from "jszip";
-import { saveAs } from "file-saver";
 import {
   ArrowLeft,
   Bell,
@@ -43,6 +41,19 @@ import transferGuardIcon from "./assets/product-icons/transfer_guard.png";
 import otSecurityIcon from "./assets/product-icons/ot_Security.png";
 import fileBlueIcon from "./assets/other-icons/file_blue.png";
 import usbBlueIcon from "./assets/other-icons/usb_blue.png";
+import { exportSelectedSectionsDocx } from "./docxExport";
+import {
+  attachSectionTemplate,
+  createSection as createSectionModel,
+  emptyPovContext,
+  getAiPlan,
+  getAiReadiness,
+  hasSectionInput,
+  libraryGroups,
+  sectionTemplates,
+  serializeSection,
+  serializeSectionForStorage
+} from "./sectionModel";
 import "./styles.css";
 
 const navItems = [
@@ -53,812 +64,59 @@ const navItems = [
   { label: "Settings", icon: Settings }
 ];
 
-const libraryGroups = [
-  { id: "setup", label: "Setup" },
-  { id: "plan", label: "Plan" },
-  { id: "validate", label: "Validate" },
-  { id: "deliver", label: "Deliver" },
-  { id: "close", label: "Close" },
-  { id: "assets", label: "Assets" }
-];
+const sectionIconMap = {
+  Blocks,
+  ClipboardCheck,
+  Clock3,
+  FileText,
+  Gauge,
+  GitBranch,
+  Layers3,
+  ListChecks,
+  LockKeyhole,
+  Network,
+  PanelLeft,
+  Pencil,
+  Send,
+  Settings,
+  ShieldCheck,
+  Table2,
+  Target,
+  UserRound
+};
 
-const sectionTemplates = [
-  {
-    group: "assets",
-    section: "Diagram",
-    label: "Diagram Generator",
-    detail: "Generate an OPSWAT-style architecture or workflow diagram.",
-    icon: GitBranch,
-    type: "diagram",
-    repeatable: true,
-    exportKey: "assets.diagram",
-    purpose: "Create a reusable diagram block that can be placed anywhere in the PoV document.",
-    requiredFields: ["Diagram context", "Diagram pattern", "Caption"]
-  },
-  {
-    group: "setup",
-    section: "Cover",
-    label: "Engagement Details",
-    detail: "Customer, dates, version, classification.",
-    icon: FileText,
-    type: "table",
-    exportKey: "cover.engagementDetails",
-    purpose: "Capture the document metadata shown on the cover page.",
-    requiredFields: ["Client", "Engagement Type", "AE", "SE", "PoV Duration", "Classification"],
-    columns: ["Field", "Value"],
-    rows: ["Client", "Engagement Type", "OPSWAT Account Executive", "OPSWAT Solutions Engineer", "PoV Duration", "Document Version", "Classification"]
-  },
-  {
-    group: "setup",
-    section: "1",
-    label: "Executive Summary",
-    detail: "Objectives, scope, and value summary.",
-    icon: PanelLeft,
-    type: "narrative",
-    exportKey: "sections.executiveSummary",
-    purpose: "Summarize the customer's drivers, the proposed OPSWAT value, and how the PoV will be run.",
-    requiredFields: ["Customer security requirement", "Operational challenge", "PoV duration", "Value statement"],
-    ai: { mode: "draft", target: "draft" }
-  },
-  {
-    group: "setup",
-    section: "2",
-    label: "OPSWAT Products in Scope",
-    detail: "Product modules, versions, and purpose.",
-    icon: ShieldCheck,
-    type: "table",
-    exportKey: "sections.productsInScope",
-    purpose: "List the OPSWAT products and modules included in the evaluation.",
-    requiredFields: ["Product / Module", "Version", "Purpose / Description"],
-    columns: ["Product / Module", "Version", "Purpose / Description"],
-    ai: { mode: "table", target: "Purpose / Description" }
-  },
-  {
-    group: "setup",
-    section: "3",
-    label: "Customer Environment & Infrastructure",
-    detail: "Environment overview and infrastructure details.",
-    icon: Layers3,
-    type: "table",
-    exportKey: "sections.customerEnvironment",
-    purpose: "Describe the customer environment and collect infrastructure parameters.",
-    requiredFields: ["Environment overview", "Operating systems", "Network architecture", "Existing security stack"],
-    introLabel: "Environment Overview",
-    columns: ["Parameter", "Details"],
-    rows: ["Deployment location", "Operating system(s)", "Internet connectivity", "Authentication", "Other relevant context"],
-    ai: { mode: "intro", target: "intro" }
-  },
-  {
-    group: "plan",
-    section: "4",
-    label: "Business Challenges, Objectives & Value Outcomes",
-    detail: "Challenges, outcomes, and KPIs.",
-    icon: Target,
-    type: "table",
-    exportKey: "sections.businessOutcomes",
-    purpose: "Link discovery pain points to measurable value outcomes and evidence sources.",
-    requiredFields: ["Business challenge", "Business objective", "KPI / Metric", "Baseline", "Target", "Evidence Source"],
-    introLabel: "Business Challenges",
-    columns: ["Business Objective", "KPI / Metric", "Baseline", "Target", "Evidence Source"]
-  },
-  {
-    group: "plan",
-    section: "5",
-    label: "Scope",
-    detail: "In-scope and out-of-scope boundaries.",
-    icon: ClipboardCheck,
-    type: "checklist",
-    exportKey: "sections.scope",
-    purpose: "Define what the PoV will and will not cover.",
-    requiredFields: ["In-scope items", "Out-of-scope items"],
-    lists: ["In Scope", "Out of Scope"]
-  },
-  {
-    group: "plan",
-    section: "6",
-    label: "Assumptions & Dependencies",
-    detail: "Dependencies, owners, and impact notes.",
-    icon: ListChecks,
-    type: "table",
-    exportKey: "sections.assumptionsDependencies",
-    purpose: "Track assumptions that affect PoV timeline or success.",
-    requiredFields: ["Assumption / Dependency", "Owner / Notes"],
-    columns: ["Assumption / Dependency", "Owner / Notes"]
-  },
-  {
-    group: "plan",
-    section: "12",
-    label: "PoV Timeline & Milestones",
-    detail: "Phases, activities, dates, and close-out.",
-    icon: Clock3,
-    type: "timeline",
-    exportKey: "sections.timelineMilestones",
-    purpose: "Define PoV phases, activities, descriptions, and target dates.",
-    requiredFields: ["Phase", "Activity", "Description", "Target Date"],
-    columns: ["Phase", "Activity", "Description", "Target Date"]
-  },
-  {
-    group: "plan",
-    section: "13",
-    label: "Governance, Communication & Escalation",
-    detail: "Cadence, channels, escalation path, and SLAs.",
-    icon: Network,
-    type: "table",
-    exportKey: "sections.governanceEscalation",
-    purpose: "Capture operating cadence, collaboration channels, and escalation contacts.",
-    requiredFields: ["Cadence / Channel", "Escalation level", "Contacts", "SLA"],
-    introLabel: "Cadence & Channels",
-    columns: ["Mechanism / Level", "Description / Contact", "SLA / Use"]
-  },
-  {
-    group: "validate",
-    section: "7",
-    label: "Success Criteria",
-    detail: "Verdicts, priorities, and success matrix.",
-    icon: Table2,
-    type: "table",
-    exportKey: "sections.successCriteria",
-    purpose: "Define measurable criteria, validation methods, thresholds, and verdicts.",
-    requiredFields: ["Priority", "Success Criterion", "Validation Method", "Threshold / Target"],
-    columns: ["Priority", "Success Criterion", "Validation Method", "Threshold / Target", "Verdict"]
-  },
-  {
-    group: "validate",
-    section: "8",
-    label: "Exit Criteria & Failure Definition",
-    detail: "Pass, conditional pass, fail, and early exit.",
-    icon: Gauge,
-    type: "checklist",
-    exportKey: "sections.exitCriteria",
-    purpose: "Define pass/fail rubric and early-exit triggers.",
-    requiredFields: ["Pass criteria", "Conditional pass criteria", "Fail criteria", "Early-exit triggers"],
-    lists: ["Pass / Fail Rubric", "Early-Exit Triggers"]
-  },
-  {
-    group: "validate",
-    section: "9",
-    label: "Use Cases to Be Validated",
-    detail: "Use-case IDs, descriptions, and products.",
-    icon: GitBranch,
-    type: "table",
-    exportKey: "sections.useCases",
-    purpose: "List the PoV validation scenarios and associated products.",
-    requiredFields: ["Use Case", "Description", "Product(s)"],
-    columns: ["ID", "Use Case", "Description", "Product(s)"]
-  },
-  {
-    group: "validate",
-    section: "10",
-    label: "Test Data & Sample Set Definition",
-    detail: "Data sets, ownership, volume, handling.",
-    icon: FileText,
-    type: "table",
-    exportKey: "sections.testData",
-    purpose: "Define representative test data, source owners, and handling rules.",
-    requiredFields: ["Data Set", "Purpose", "Source / Owner", "Handling rules"],
-    introLabel: "Volume targets and handling rules",
-    columns: ["Data Set", "Purpose", "Source / Owner"]
-  },
-  {
-    group: "validate",
-    section: "11",
-    label: "Compliance & Control Mapping",
-    detail: "Framework controls mapped to capabilities.",
-    icon: LockKeyhole,
-    type: "table",
-    exportKey: "sections.complianceMapping",
-    purpose: "Map customer frameworks and controls to demonstrated OPSWAT capabilities.",
-    requiredFields: ["Framework / Regulation", "Control Reference", "OPSWAT Capability", "PoV Criterion #"],
-    columns: ["Framework / Regulation", "Control Reference", "OPSWAT Capability Demonstrated", "PoV Criterion #"]
-  },
-  {
-    group: "deliver",
-    section: "14",
-    label: "Roles & Responsibilities",
-    detail: "OPSWAT and customer stakeholders.",
-    icon: UserRound,
-    type: "table",
-    exportKey: "sections.rolesResponsibilities",
-    purpose: "Capture stakeholder names and responsibilities.",
-    requiredFields: ["Role", "Name", "Responsibilities"],
-    columns: ["Role", "Name", "Responsibilities"]
-  },
-  {
-    group: "deliver",
-    section: "15",
-    label: "RACI Matrix",
-    detail: "Responsibility assignment across activities.",
-    icon: Table2,
-    type: "matrix",
-    exportKey: "sections.raciMatrix",
-    purpose: "Assign Responsible, Accountable, Consulted, and Informed roles for key tasks.",
-    requiredFields: ["Activity / Task", "Customer Tech", "Customer Mgr", "OPSWAT Tech", "OPSWAT Mgr"],
-    columns: ["Activity / Task", "Customer Tech", "Customer Mgr", "OPSWAT Tech", "OPSWAT Mgr"]
-  },
-  {
-    group: "deliver",
-    section: "16",
-    label: "Technical Prerequisites & Installation Requirements",
-    detail: "Prerequisites, ports, URLs, and checklists.",
-    icon: Settings,
-    type: "checklist",
-    exportKey: "sections.technicalPrerequisites",
-    purpose: "Collect product prerequisites, network requirements, and pre-kick-off checklist items.",
-    requiredFields: ["Product prerequisites", "Network requirements", "General checklist"],
-    lists: ["Product Prerequisites", "Network Requirements", "General Pre-Kick-off Checklist"]
-  },
-  {
-    group: "deliver",
-    section: "17",
-    label: "Data Handling, Confidentiality & Security",
-    detail: "Data, malware samples, logs, credentials.",
-    icon: LockKeyhole,
-    type: "table",
-    exportKey: "sections.dataHandlingSecurity",
-    purpose: "Define how customer data, malware samples, logs, credentials, and retention are handled.",
-    requiredFields: ["Topic", "Handling"],
-    columns: ["Topic", "Handling"]
-  },
-  {
-    group: "deliver",
-    section: "18",
-    label: "Training & Knowledge Transfer",
-    detail: "Sessions, audiences, and outcomes.",
-    icon: ClipboardCheck,
-    type: "table",
-    exportKey: "sections.trainingKnowledgeTransfer",
-    purpose: "Define training sessions, intended audiences, and outcomes.",
-    requiredFields: ["Session", "Audience", "Outcome"],
-    columns: ["Session", "Audience", "Outcome"]
-  },
-  {
-    group: "deliver",
-    section: "19",
-    label: "Risk & Issue Log",
-    detail: "Risks, likelihood, impact, mitigation.",
-    icon: Gauge,
-    type: "table",
-    exportKey: "sections.riskIssueLog",
-    purpose: "Track PoV risks and issues with likelihood, impact, and mitigation.",
-    requiredFields: ["Risk / Issue", "Likelihood", "Impact", "Mitigation"],
-    columns: ["Risk / Issue", "Likelihood", "Impact", "Mitigation"]
-  },
-  {
-    group: "close",
-    section: "20",
-    label: "Post-PoV Next Steps & Conversion Plan",
-    detail: "Commercial, deployment, readiness, support.",
-    icon: Send,
-    type: "table",
-    exportKey: "sections.nextStepsConversion",
-    purpose: "Define the path from a successful PoV into production.",
-    requiredFields: ["Workstream", "Activity"],
-    columns: ["Workstream", "Activity"]
-  },
-  {
-    group: "close",
-    section: "21",
-    label: "Decommissioning & Wind-Down",
-    detail: "Cleanup and licence/data handling.",
-    icon: ListChecks,
-    type: "checklist",
-    exportKey: "sections.decommissioning",
-    purpose: "Capture close-out cleanup tasks for software, data, licences, accounts, and firewall rules.",
-    requiredFields: ["Wind-down tasks"],
-    lists: ["Wind-Down Tasks"]
-  },
-  {
-    group: "close",
-    section: "22",
-    label: "PoV Agreement & Sign-Off",
-    detail: "OPSWAT and customer acknowledgement.",
-    icon: Pencil,
-    type: "signoff",
-    exportKey: "sections.signoff",
-    purpose: "Collect OPSWAT and customer sign-off fields.",
-    requiredFields: ["OPSWAT Representative", "Customer Representative"]
-  },
-  {
-    group: "close",
-    section: "23",
-    label: "Appendix",
-    detail: "References, repository, glossary, change log.",
-    icon: Blocks,
-    type: "appendix",
-    exportKey: "sections.appendix",
-    purpose: "Collect product references, test repository notes, glossary additions, and change log entries.",
-    requiredFields: ["Product references", "Test file repository", "Glossary", "Change log"]
+const draftStorageKey = "opswat-pov-studio:draft:v1";
+
+function iconForTemplate(template) {
+  return sectionIconMap[template.iconKey] || FileText;
+}
+
+function withTemplateIcons(template) {
+  return { ...template, icon: iconForTemplate(template) };
+}
+
+function readSavedDraft() {
+  try {
+    const raw = window.localStorage.getItem(draftStorageKey);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
   }
-];
+}
 
-const emptyRow = (columns) => Object.fromEntries(columns.map((column) => [column, ""]));
+function writeSavedDraft(draft) {
+  try {
+    window.localStorage.setItem(draftStorageKey, JSON.stringify(draft));
+  } catch {
+    // Local persistence is a convenience; app editing should continue if storage is unavailable.
+  }
+}
 
-function splitIntakeList(value) {
-  return String(value || "")
-    .split(/[,;\n]+/)
-    .map((item) => item.trim())
+function rehydrateSections(savedSections = []) {
+  return savedSections
+    .map((section) => attachSectionTemplate(section, iconForTemplate))
     .filter(Boolean);
-}
-
-function createSectionData(template) {
-  if (template.type === "diagram") {
-    return {
-      context: "",
-      caption: "",
-      pattern: "kiosk",
-      generated: false
-    };
-  }
-  if (template.type === "narrative") return { notes: "", draft: "", citations: [] };
-  if (template.type === "checklist") return { lists: Object.fromEntries(template.lists.map((list) => [list, [""]])) };
-  if (template.type === "timeline" || template.type === "matrix" || template.type === "table") {
-    return {
-      intro: "",
-      rows: template.rows
-        ? template.rows.map((label) => ({ ...emptyRow(template.columns), [template.columns[0]]: label }))
-        : [emptyRow(template.columns)]
-    };
-  }
-  if (template.type === "signoff") {
-    return {
-      representatives: [
-        { party: "OPSWAT Representative", name: "", title: "", date: "" },
-        { party: "Customer Representative", name: "", title: "", date: "" }
-      ]
-    };
-  }
-  return { references: "", repository: "", glossary: "", changeLog: "" };
-}
-
-function hydrateSectionDataFromIntake(template, data, intake) {
-  if (template.exportKey === "cover.engagementDetails") {
-    return {
-      ...data,
-      rows: data.rows.map((row) => {
-        const valueByField = {
-          Client: intake.customer,
-          "Engagement Type": "Proof of Value (PoV)",
-          "OPSWAT Account Executive": intake.accountExecutive,
-          "OPSWAT Solutions Engineer": intake.solutionsEngineer,
-          "PoV Duration": [intake.startDate, intake.endDate].filter(Boolean).join(" - "),
-          "Document Version": "v1.0",
-          Classification: "Confidential"
-        };
-        return { ...row, Value: valueByField[row.Field] || row.Value };
-      })
-    };
-  }
-  if (template.exportKey === "sections.executiveSummary") {
-    return {
-      ...data,
-      notes: [intake.customer && `Customer: ${intake.customer}`, intake.industry && `Industry: ${intake.industry}`, intake.challenges && `Business challenges: ${intake.challenges}`, intake.useCases && `Use cases discussed: ${intake.useCases}`, intake.products && `Products in scope: ${intake.products}`, intake.compliance && `Compliance drivers: ${intake.compliance}`]
-        .filter(Boolean)
-        .join("\n")
-    };
-  }
-  if (template.exportKey === "sections.productsInScope") {
-    const products = splitIntakeList(intake.products);
-    if (!products.length) return data;
-    return {
-      ...data,
-      rows: products.map((product) => ({
-        "Product / Module": product,
-        Version: "",
-        "Purpose / Description": ""
-      }))
-    };
-  }
-  if (template.exportKey === "sections.customerEnvironment") {
-    return {
-      ...data,
-      intro: [intake.customer && `${intake.customer} operates in the ${intake.industry || "specified"} sector.`, intake.challenges && `Key discovery context: ${intake.challenges}`]
-        .filter(Boolean)
-        .join(" "),
-      rows: data.rows.map((row) =>
-        row.Parameter === "Other relevant context" && intake.compliance
-          ? { ...row, Details: `Compliance drivers: ${intake.compliance}` }
-          : row
-      )
-    };
-  }
-  if (template.exportKey === "sections.useCases") {
-    const useCases = splitIntakeList(intake.useCases);
-    if (!useCases.length) return data;
-    return {
-      ...data,
-      rows: useCases.map((useCase, index) => ({
-        ID: `UC-${index + 1}`,
-        "Use Case": useCase,
-        Description: "",
-        "Product(s)": intake.products || ""
-      }))
-    };
-  }
-  return data;
-}
-
-function hasSectionInput(section) {
-  const { data, template } = section;
-  if (template.type === "diagram") return Boolean(data.context.trim());
-  if (template.type === "narrative") return Boolean(data.notes.trim() || data.draft.trim());
-  if (template.type === "checklist") return Object.values(data.lists).flat().some((item) => item.trim());
-  if (template.type === "signoff") return data.representatives.some((rep) => rep.name.trim() || rep.title.trim() || rep.date.trim());
-  if (template.type === "appendix") return Object.values(data).some((value) => value.trim());
-  return Boolean(data.intro?.trim()) || data.rows.some((row) => Object.values(row).some((value) => value.trim()));
-}
-
-const docxColors = {
-  blue: "1363DF",
-  navy: "061B3A",
-  muted: "5E6D84",
-  line: "D9E2F1",
-  headerFill: "EEF4FF",
-  white: "FFFFFF"
-};
-
-const opswatTemplatePath = "/templates/opswat_word_doc.docx";
-const simplonNorm = "Simplon Norm";
-const simplonNormBold = "Simplon Norm Bold";
-
-function getRowValue(section, fieldName) {
-  const row = section?.data?.rows?.find((item) => item.Field === fieldName);
-  return row?.Value?.trim() || "";
-}
-
-function getTableValue(section, firstColumnValue, columnName) {
-  const firstColumn = section?.template?.columns?.[0];
-  const row = section?.data?.rows?.find((item) => item[firstColumn] === firstColumnValue);
-  return row?.[columnName]?.trim() || "";
-}
-
-function getEngagementRows(section) {
-  return ["Client", "Engagement Type", "OPSWAT Account Executive", "OPSWAT Solutions Engineer", "PoV Duration", "Document Version", "Classification"].map(
-    (field) => [field, getRowValue(section, field)]
-  );
-}
-
-function escapeXml(value) {
-  return String(value)
-    .replaceAll("&", "&amp;")
-    .replaceAll("<", "&lt;")
-    .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;")
-    .replaceAll("'", "&apos;");
-}
-
-function paragraphXml(text, options = {}) {
-  const style = options.style ? `<w:pStyle w:val="${options.style}"/>` : "";
-  const spacing = `<w:spacing w:after="${options.after ?? 160}" w:line="${options.line ?? 276}" w:lineRule="auto"/>`;
-  const font = options.bold ? simplonNormBold : simplonNorm;
-  const bold = options.bold ? "<w:b/>" : "";
-  const size = options.size || 22;
-  const color = options.color || docxColors.navy;
-
-  return `
-    <w:p>
-      <w:pPr>${style}${spacing}</w:pPr>
-      <w:r>
-        <w:rPr>
-          <w:rFonts w:ascii="${font}" w:hAnsi="${font}" w:cs="${font}"/>
-          ${bold}
-          <w:color w:val="${color}"/>
-          <w:sz w:val="${size}"/>
-          <w:szCs w:val="${size}"/>
-        </w:rPr>
-        <w:t xml:space="preserve">${escapeXml(text)}</w:t>
-      </w:r>
-    </w:p>`;
-}
-
-function headingXml(text, level = 4) {
-  return paragraphXml(text, {
-    style: `Heading${level}`,
-    size: level <= 2 ? 28 : 22,
-    bold: true,
-    color: docxColors.blue,
-    after: 160
-  });
-}
-
-function bodyXml(text) {
-  return paragraphXml(text, {
-    style: "BodyText",
-    size: 20,
-    color: docxColors.navy,
-    after: 180
-  });
-}
-
-function tableCellXml(text, options = {}) {
-  const font = options.bold ? simplonNormBold : simplonNorm;
-  const bold = options.bold ? "<w:b/>" : "";
-  const shading = options.shading ? `<w:shd w:val="clear" w:color="auto" w:fill="${options.shading}"/>` : "";
-  const width = options.width || 4200;
-  const color = options.color || docxColors.navy;
-
-  return `
-    <w:tc>
-      <w:tcPr>
-        <w:tcW w:w="${width}" w:type="dxa"/>
-        ${shading}
-        <w:tcMar>
-          <w:top w:w="140" w:type="dxa"/>
-          <w:left w:w="180" w:type="dxa"/>
-          <w:bottom w:w="140" w:type="dxa"/>
-          <w:right w:w="180" w:type="dxa"/>
-        </w:tcMar>
-        <w:vAlign w:val="center"/>
-      </w:tcPr>
-      <w:p>
-        <w:pPr><w:spacing w:after="0" w:line="252" w:lineRule="auto"/></w:pPr>
-        <w:r>
-          <w:rPr>
-            <w:rFonts w:ascii="${font}" w:hAnsi="${font}" w:cs="${font}"/>
-            ${bold}
-            <w:color w:val="${color}"/>
-            <w:sz w:val="20"/>
-            <w:szCs w:val="20"/>
-          </w:rPr>
-          <w:t xml:space="preserve">${escapeXml(text)}</w:t>
-        </w:r>
-      </w:p>
-    </w:tc>`;
-}
-
-function tableXml(rows, columnWidths, options = {}) {
-  return `
-    <w:tbl>
-      <w:tblPr>
-        <w:tblW w:w="${columnWidths.reduce((sum, width) => sum + width, 0)}" w:type="dxa"/>
-        <w:tblBorders>
-          <w:top w:val="single" w:sz="8" w:space="0" w:color="${docxColors.line}"/>
-          <w:left w:val="single" w:sz="8" w:space="0" w:color="${docxColors.line}"/>
-          <w:bottom w:val="single" w:sz="8" w:space="0" w:color="${docxColors.line}"/>
-          <w:right w:val="single" w:sz="8" w:space="0" w:color="${docxColors.line}"/>
-          <w:insideH w:val="single" w:sz="8" w:space="0" w:color="${docxColors.line}"/>
-          <w:insideV w:val="single" w:sz="8" w:space="0" w:color="${docxColors.line}"/>
-        </w:tblBorders>
-        <w:tblCellMar>
-          <w:top w:w="0" w:type="dxa"/>
-          <w:left w:w="0" w:type="dxa"/>
-          <w:bottom w:w="0" w:type="dxa"/>
-          <w:right w:w="0" w:type="dxa"/>
-        </w:tblCellMar>
-      </w:tblPr>
-      <w:tblGrid>
-        ${columnWidths.map((width) => `<w:gridCol w:w="${width}"/>`).join("")}
-      </w:tblGrid>
-      ${rows
-        .map(
-          (row, rowIndex) => `
-            <w:tr>
-              ${row
-                .map((value, cellIndex) =>
-                  tableCellXml(value, {
-                    width: columnWidths[cellIndex],
-                    bold: options.headerRow ? rowIndex === 0 : cellIndex === 0,
-                    shading: options.headerRow ? (rowIndex === 0 ? docxColors.headerFill : "") : cellIndex === 0 ? docxColors.headerFill : ""
-                  })
-                )
-                .join("")}
-            </w:tr>`
-        )
-        .join("")}
-    </w:tbl>`;
-}
-
-function engagementTableXml(rows) {
-  return tableXml(rows, [2900, 5500]);
-}
-
-function sectionByExportKey(sections, exportKey) {
-  return sections.find((section) => section.template.exportKey === exportKey);
-}
-
-function nonEmptyRows(section) {
-  return section?.data?.rows?.filter((row) => Object.values(row).some((value) => value.trim())) || [];
-}
-
-function textBlockXml(text) {
-  return String(text || "")
-    .split(/\n+/)
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => bodyXml(line))
-    .join("");
-}
-
-function selectedSectionTitle(section) {
-  if (section.template.section === "Cover") return section.title;
-  if (section.template.type === "diagram") return section.title;
-  return `${section.template.section}. ${section.title}`;
-}
-
-function columnWidthsFor(columns) {
-  const count = columns.length;
-  if (count === 1) return [8400];
-  if (count === 2) return [2900, 5500];
-  if (count === 3) return [1800, 2800, 3800];
-  if (count === 4) return [1250, 2350, 2400, 2400];
-  if (count === 5) return [2000, 1600, 1600, 1600, 1600];
-  const width = Math.floor(8400 / Math.max(count, 1));
-  return columns.map(() => width);
-}
-
-function tableSectionXml(section) {
-  const columns = section.template.columns || [];
-  if (!columns.length) return "";
-  const rows = nonEmptyRows(section).map((row) => columns.map((column) => row[column]?.trim() || ""));
-  if (!rows.length) return tableXml([columns], columnWidthsFor(columns), { headerRow: true });
-  return tableXml([columns, ...rows], columnWidthsFor(columns), { headerRow: true });
-}
-
-function checklistSectionXml(section) {
-  return Object.entries(section.data.lists)
-    .map(([listName, items]) => {
-      const listItems = items.map((item) => item.trim()).filter(Boolean);
-      return `
-        ${headingXml(listName, 6)}
-        ${listItems.length ? listItems.map((item) => bodyXml(`- ${item}`)).join("") : bodyXml("TBC")}`;
-    })
-    .join("");
-}
-
-function diagramSectionXml(section) {
-  const { caption, context, generated, pattern } = section.data;
-  return `
-    ${bodyXml(caption?.trim() || "Diagram caption TBC")}
-    ${tableXml(
-      [
-        ["Field", "Value"],
-        ["Pattern", pattern === "mft" ? "Managed file transfer" : "Kiosk / sheep dip"],
-        ["Status", generated ? "Preview generated in PoV Studio" : "Diagram not generated yet"],
-        ["Context", context?.trim() || "TBC"]
-      ],
-      [2200, 6200],
-      { headerRow: true }
-    )}`;
-}
-
-function signoffSectionXml(section) {
-  const rows = section.data.representatives.map((rep) => [
-    rep.party,
-    ["Name", rep.name, "Title", rep.title, "Date", rep.date].filter(Boolean).join("  ")
-  ]);
-  return tableXml(rows, [3200, 5200]);
-}
-
-function appendixSectionXml(section) {
-  const fields = [
-    ["Product References", section.data.references],
-    ["Test File Repository", section.data.repository],
-    ["Glossary", section.data.glossary],
-    ["Document Change Log", section.data.changeLog]
-  ];
-  return fields
-    .filter(([, value]) => value?.trim())
-    .map(([label, value]) => `${headingXml(label, 6)}${textBlockXml(value)}`)
-    .join("");
-}
-
-function selectedSectionContentXml(section) {
-  const { data, template } = section;
-  if (template.type === "narrative") return textBlockXml(data.draft || data.notes || "TBC");
-  if (template.type === "checklist") return checklistSectionXml(section);
-  if (template.type === "diagram") return diagramSectionXml(section);
-  if (template.type === "signoff") return signoffSectionXml(section);
-  if (template.type === "appendix") return appendixSectionXml(section) || bodyXml("TBC");
-
-  const intro = data.intro?.trim() ? textBlockXml(data.intro) : "";
-  return `${intro}${tableSectionXml(section)}`;
-}
-
-function selectedSectionXml(section) {
-  if (section.template.exportKey === "cover.engagementDetails") {
-    return `
-      ${headingXml("Engagement Details", 4)}
-      ${engagementTableXml(getEngagementRows(section))}`;
-  }
-  return `
-    ${headingXml(selectedSectionTitle(section), 4)}
-    ${selectedSectionContentXml(section)}`;
-}
-
-function buildTemplateDocumentXml(originalXml, sections) {
-  const bodyOpen = originalXml.match(/^[\s\S]*?<w:body>/)?.[0];
-  if (!bodyOpen) throw new Error("The OPSWAT Word template is missing a document body.");
-  const sectPr = originalXml.match(/<w:sectPr[\s\S]*?<\/w:sectPr>/g)?.[0] || "";
-  const engagementSection = sectionByExportKey(sections, "cover.engagementDetails");
-  const clientName = getRowValue(engagementSection, "Client");
-  const selectedSectionsXml = sections.map((section) => selectedSectionXml(section)).join("");
-
-  return `${bodyOpen}
-    ${paragraphXml(`${clientName ? `${clientName} ` : ""}OPSWAT Proof of Value Plan & Success Criteria`, {
-      style: "Title",
-      size: 32,
-      bold: true,
-      color: docxColors.blue,
-      after: 80
-    })}
-    ${paragraphXml("Critical Infrastructure Protection", {
-      style: "Subtitle",
-      size: 22,
-      color: docxColors.muted,
-      after: 360
-    })}
-    ${selectedSectionsXml}
-    ${sectPr}
-  </w:body></w:document>`;
-}
-
-async function exportSelectedSectionsDocx(sections) {
-  if (!sections.length) throw new Error("Add at least one section before exporting.");
-  const engagementSection = sectionByExportKey(sections, "cover.engagementDetails");
-  const clientName = getRowValue(engagementSection, "Client") || "PoV";
-  const filenameClient = clientName.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "") || "pov";
-
-  const templateResponse = await fetch(opswatTemplatePath);
-  if (!templateResponse.ok) throw new Error("Unable to load OPSWAT Word template.");
-
-  const zip = await JSZip.loadAsync(await templateResponse.arrayBuffer());
-  const originalDocumentXml = await zip.file("word/document.xml").async("string");
-  zip.file("word/document.xml", buildTemplateDocumentXml(originalDocumentXml, sections));
-
-  const blob = await zip.generateAsync({
-    type: "blob",
-    mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-  });
-  saveAs(blob, `${filenameClient}-opswat-pov.docx`);
-}
-
-const emptyIntake = {
-  customer: "",
-  industry: "",
-  products: "",
-  challenges: "",
-  useCases: "",
-  compliance: "",
-  startDate: "",
-  endDate: "",
-  accountExecutive: "",
-  solutionsEngineer: "",
-  tone: ""
-};
-
-function getAiPlan(section) {
-  if (!section?.template?.ai) return null;
-  return section.template.ai;
-}
-
-function getAiReadiness(section, intake) {
-  if (!section) return { ready: false, reason: "Select a setup section first." };
-  const plan = getAiPlan(section);
-  if (!plan) return { ready: false, reason: "This section is structured manually and does not need AI drafting." };
-  if (!intake.customer.trim()) return { ready: false, reason: "Add the customer name in PoV Intake." };
-  if (!intake.industry.trim()) return { ready: false, reason: "Add the customer industry in PoV Intake." };
-  if (section.template.exportKey === "sections.executiveSummary" && !intake.challenges.trim()) {
-    return { ready: false, reason: "Add business challenges before drafting the executive summary." };
-  }
-  if (section.template.exportKey === "sections.productsInScope") {
-    const hasProducts = intake.products.trim() || section.data.rows.some((row) => row["Product / Module"]?.trim());
-    if (!hasProducts) return { ready: false, reason: "Add products in scope in PoV Intake or the product table." };
-  }
-  if (section.template.exportKey === "sections.customerEnvironment" && !intake.challenges.trim() && !section.data.rows.some((row) => row.Details?.trim())) {
-    return { ready: false, reason: "Add environment details or business context before drafting the overview." };
-  }
-  return { ready: true, reason: "Ready to generate this section." };
-}
-
-function serializeSection(section) {
-  return {
-    id: section.id,
-    title: section.title,
-    exportKey: section.template.exportKey,
-    type: section.template.type,
-    ai: section.template.ai,
-    columns: section.template.columns || [],
-    data: section.data
-  };
 }
 
 function applyGeneratedSection(sectionId, payload, updateSectionData) {
@@ -884,45 +142,42 @@ function applyGeneratedSection(sectionId, payload, updateSectionData) {
 }
 
 function App() {
-  const [documentStage, setDocumentStage] = useState("start");
+  const savedDraft = useMemo(() => readSavedDraft(), []);
+  const [documentStage, setDocumentStage] = useState(savedDraft?.documentStage || "start");
   const [isContextEditing, setIsContextEditing] = useState(false);
   const [activeLibraryGroup, setActiveLibraryGroup] = useState("setup");
-  const [sections, setSections] = useState([]);
-  const [activeSectionId, setActiveSectionId] = useState(null);
+  const [sections, setSections] = useState(() => rehydrateSections(savedDraft?.sections));
+  const [activeSectionId, setActiveSectionId] = useState(savedDraft?.activeSectionId || null);
   const [isDropActive, setIsDropActive] = useState(false);
   const [draggedSectionId, setDraggedSectionId] = useState(null);
-  const [intake, setIntake] = useState(emptyIntake);
+  const [povContext, setPovContext] = useState({ ...emptyPovContext, ...(savedDraft?.povContext || {}) });
   const [isExporting, setIsExporting] = useState(false);
 
   const activeSection = sections.find((section) => section.id === activeSectionId) || null;
-  const visibleLibraryItems = sectionTemplates.filter((item) => item.group === activeLibraryGroup);
+  const hydratedTemplates = useMemo(() => sectionTemplates.map(withTemplateIcons), []);
+  const visibleLibraryItems = hydratedTemplates.filter((item) => item.group === activeLibraryGroup);
   const addedSectionIds = new Set(sections.map((section) => section.id));
   const activeAiPlan = getAiPlan(activeSection);
-  const aiReadiness = getAiReadiness(activeSection, intake);
+  const aiReadiness = getAiReadiness(activeSection, povContext);
   const canGenerateActiveSection = Boolean(activeAiPlan && aiReadiness.ready);
   const canExportSections = sections.length > 0;
   const [isGenerating, setIsGenerating] = useState(false);
   const [assistantMessage, setAssistantMessage] = useState("");
-  const projectTitle = intake.customer.trim() ? `${intake.customer} PoV` : "New PoV";
+  const projectTitle = povContext.customer.trim() ? `${povContext.customer} PoV` : "New PoV";
 
-  function createSection(template) {
-    const id = template.repeatable ? `${template.section}-${crypto.randomUUID()}` : template.section;
-    const baseData = createSectionData(template);
-    return {
-      id,
-      title: template.label,
-      subtitle: template.detail,
-      icon: template.icon,
-      template,
-      data: hydrateSectionDataFromIntake(template, baseData, intake),
-      reviewState: "Not started"
-    };
-  }
+  useEffect(() => {
+    writeSavedDraft({
+      documentStage,
+      povContext,
+      activeSectionId,
+      sections: sections.map(serializeSectionForStorage)
+    });
+  }, [activeSectionId, documentStage, povContext, sections]);
 
   function addSection(sectionId, insertIndex = sections.length) {
-    const template = sectionTemplates.find((item) => item.section === sectionId);
+    const template = hydratedTemplates.find((item) => item.section === sectionId);
     if (!template || (!template.repeatable && addedSectionIds.has(sectionId))) return;
-    const nextSection = createSection(template);
+    const nextSection = attachSectionTemplate(createSectionModel(template, povContext), iconForTemplate);
     setSections((current) => {
       const next = [...current];
       next.splice(insertIndex, 0, nextSection);
@@ -1001,8 +256,8 @@ function App() {
     setIsDropActive(false);
   }
 
-  function updateIntake(field, value) {
-    setIntake((current) => ({ ...current, [field]: value }));
+  function updatePovContext(field, value) {
+    setPovContext((current) => ({ ...current, [field]: value }));
   }
 
   function enterEditor() {
@@ -1020,7 +275,8 @@ function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           section: serializeSection(activeSection),
-          intake
+          intake: povContext,
+          povContext
         })
       });
       const payload = await response.json();
@@ -1108,9 +364,9 @@ function App() {
 
         {documentStage !== "editor" ? (
           <DocumentSetup
-            intake={intake}
+            intake={povContext}
             onBack={() => setDocumentStage("start")}
-            onChange={updateIntake}
+            onChange={updatePovContext}
             onCreate={() => setDocumentStage("context")}
             onSubmit={enterEditor}
             stage={documentStage}
@@ -1206,13 +462,13 @@ function App() {
             {isContextEditing ? (
               <PovContextForm
                 compact
-                intake={intake}
+                intake={povContext}
                 onBack={() => setIsContextEditing(false)}
-                onChange={updateIntake}
+                onChange={updatePovContext}
                 onSubmit={() => setIsContextEditing(false)}
               />
             ) : (
-              <ContextSummary intake={intake} onEdit={() => setIsContextEditing(true)} />
+              <ContextSummary intake={povContext} onEdit={() => setIsContextEditing(true)} />
             )}
             <div className="assistant-copy">
               <strong>Generate selected section</strong>
