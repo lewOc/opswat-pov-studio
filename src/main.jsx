@@ -646,18 +646,109 @@ function nonEmptyRows(section) {
   return section?.data?.rows?.filter((row) => Object.values(row).some((value) => value.trim())) || [];
 }
 
-function buildProductsTableXml(section) {
-  const columns = ["Product / Module", "Version", "Purpose / Description"];
-  const rows = nonEmptyRows(section).map((row) => columns.map((column) => row[column]?.trim() || ""));
-  if (!rows.length) return "";
-  return tableXml([columns, ...rows], [2600, 1300, 4500], { headerRow: true });
+function textBlockXml(text) {
+  return String(text || "")
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => bodyXml(line))
+    .join("");
 }
 
-function buildEnvironmentTableXml(section) {
-  const columns = ["Item", "Detail"];
-  const rows = nonEmptyRows(section).map((row) => [row[section.template.columns[0]]?.trim() || "", row.Details?.trim() || ""]);
-  if (!rows.length) return "";
-  return tableXml([columns, ...rows], [2900, 5500], { headerRow: true });
+function selectedSectionTitle(section) {
+  if (section.template.section === "Cover") return section.title;
+  if (section.template.type === "diagram") return section.title;
+  return `${section.template.section}. ${section.title}`;
+}
+
+function columnWidthsFor(columns) {
+  const count = columns.length;
+  if (count === 1) return [8400];
+  if (count === 2) return [2900, 5500];
+  if (count === 3) return [1800, 2800, 3800];
+  if (count === 4) return [1250, 2350, 2400, 2400];
+  if (count === 5) return [2000, 1600, 1600, 1600, 1600];
+  const width = Math.floor(8400 / Math.max(count, 1));
+  return columns.map(() => width);
+}
+
+function tableSectionXml(section) {
+  const columns = section.template.columns || [];
+  if (!columns.length) return "";
+  const rows = nonEmptyRows(section).map((row) => columns.map((column) => row[column]?.trim() || ""));
+  if (!rows.length) return tableXml([columns], columnWidthsFor(columns), { headerRow: true });
+  return tableXml([columns, ...rows], columnWidthsFor(columns), { headerRow: true });
+}
+
+function checklistSectionXml(section) {
+  return Object.entries(section.data.lists)
+    .map(([listName, items]) => {
+      const listItems = items.map((item) => item.trim()).filter(Boolean);
+      return `
+        ${headingXml(listName, 6)}
+        ${listItems.length ? listItems.map((item) => bodyXml(`- ${item}`)).join("") : bodyXml("TBC")}`;
+    })
+    .join("");
+}
+
+function diagramSectionXml(section) {
+  const { caption, context, generated, pattern } = section.data;
+  return `
+    ${bodyXml(caption?.trim() || "Diagram caption TBC")}
+    ${tableXml(
+      [
+        ["Field", "Value"],
+        ["Pattern", pattern === "mft" ? "Managed file transfer" : "Kiosk / sheep dip"],
+        ["Status", generated ? "Preview generated in PoV Studio" : "Diagram not generated yet"],
+        ["Context", context?.trim() || "TBC"]
+      ],
+      [2200, 6200],
+      { headerRow: true }
+    )}`;
+}
+
+function signoffSectionXml(section) {
+  const rows = section.data.representatives.map((rep) => [
+    rep.party,
+    ["Name", rep.name, "Title", rep.title, "Date", rep.date].filter(Boolean).join("  ")
+  ]);
+  return tableXml(rows, [3200, 5200]);
+}
+
+function appendixSectionXml(section) {
+  const fields = [
+    ["Product References", section.data.references],
+    ["Test File Repository", section.data.repository],
+    ["Glossary", section.data.glossary],
+    ["Document Change Log", section.data.changeLog]
+  ];
+  return fields
+    .filter(([, value]) => value?.trim())
+    .map(([label, value]) => `${headingXml(label, 6)}${textBlockXml(value)}`)
+    .join("");
+}
+
+function selectedSectionContentXml(section) {
+  const { data, template } = section;
+  if (template.type === "narrative") return textBlockXml(data.draft || data.notes || "TBC");
+  if (template.type === "checklist") return checklistSectionXml(section);
+  if (template.type === "diagram") return diagramSectionXml(section);
+  if (template.type === "signoff") return signoffSectionXml(section);
+  if (template.type === "appendix") return appendixSectionXml(section) || bodyXml("TBC");
+
+  const intro = data.intro?.trim() ? textBlockXml(data.intro) : "";
+  return `${intro}${tableSectionXml(section)}`;
+}
+
+function selectedSectionXml(section) {
+  if (section.template.exportKey === "cover.engagementDetails") {
+    return `
+      ${headingXml("Engagement Details", 4)}
+      ${engagementTableXml(getEngagementRows(section))}`;
+  }
+  return `
+    ${headingXml(selectedSectionTitle(section), 4)}
+    ${selectedSectionContentXml(section)}`;
 }
 
 function buildTemplateDocumentXml(originalXml, sections) {
@@ -665,17 +756,11 @@ function buildTemplateDocumentXml(originalXml, sections) {
   if (!bodyOpen) throw new Error("The OPSWAT Word template is missing a document body.");
   const sectPr = originalXml.match(/<w:sectPr[\s\S]*?<\/w:sectPr>/g)?.[0] || "";
   const engagementSection = sectionByExportKey(sections, "cover.engagementDetails");
-  const executiveSection = sectionByExportKey(sections, "sections.executiveSummary");
-  const productsSection = sectionByExportKey(sections, "sections.productsInScope");
-  const environmentSection = sectionByExportKey(sections, "sections.customerEnvironment");
-
-  const executiveText = executiveSection?.data?.draft?.trim() || executiveSection?.data?.notes?.trim() || "";
-  const productsTable = buildProductsTableXml(productsSection);
-  const environmentIntro = environmentSection?.data?.intro?.trim() || "";
-  const environmentTable = buildEnvironmentTableXml(environmentSection);
+  const clientName = getRowValue(engagementSection, "Client");
+  const selectedSectionsXml = sections.map((section) => selectedSectionXml(section)).join("");
 
   return `${bodyOpen}
-    ${paragraphXml("OPSWAT Proof of Value Plan & Success Criteria", {
+    ${paragraphXml(`${clientName ? `${clientName} ` : ""}OPSWAT Proof of Value Plan & Success Criteria`, {
       style: "Title",
       size: 32,
       bold: true,
@@ -688,19 +773,13 @@ function buildTemplateDocumentXml(originalXml, sections) {
       color: docxColors.muted,
       after: 360
     })}
-    ${engagementSection ? engagementTableXml(getEngagementRows(engagementSection)) : ""}
-    ${executiveSection ? headingXml("1. Executive Summary") : ""}
-    ${executiveText ? bodyXml(executiveText) : ""}
-    ${productsSection ? headingXml("2. OPSWAT Products in Scope") : ""}
-    ${productsTable}
-    ${environmentSection ? headingXml("3. Customer Environment & Infrastructure") : ""}
-    ${environmentIntro ? bodyXml(environmentIntro) : ""}
-    ${environmentTable}
+    ${selectedSectionsXml}
     ${sectPr}
   </w:body></w:document>`;
 }
 
-async function exportSetupSectionsDocx(sections) {
+async function exportSelectedSectionsDocx(sections) {
+  if (!sections.length) throw new Error("Add at least one section before exporting.");
   const engagementSection = sectionByExportKey(sections, "cover.engagementDetails");
   const clientName = getRowValue(engagementSection, "Client") || "PoV";
   const filenameClient = clientName.replace(/[^a-z0-9]+/gi, "-").replace(/^-|-$/g, "") || "pov";
@@ -806,7 +885,7 @@ function App() {
   const activeAiPlan = getAiPlan(activeSection);
   const aiReadiness = getAiReadiness(activeSection, intake);
   const canGenerateActiveSection = Boolean(activeAiPlan && aiReadiness.ready);
-  const canExportEngagementDetails = sections.some((section) => section.template.exportKey === "cover.engagementDetails");
+  const canExportSections = sections.length > 0;
   const [isGenerating, setIsGenerating] = useState(false);
   const [assistantMessage, setAssistantMessage] = useState("");
 
@@ -935,10 +1014,10 @@ function App() {
   }
 
   async function handleExport() {
-    if (!canExportEngagementDetails || isExporting) return;
+    if (!canExportSections || isExporting) return;
     setIsExporting(true);
     try {
-      await exportSetupSectionsDocx(sections);
+      await exportSelectedSectionsDocx(sections);
     } catch (error) {
       console.error(error);
       window.alert("The OPSWAT Word export could not be created. Please try again.");
@@ -1028,7 +1107,7 @@ function App() {
                 <button className="icon-button" aria-label="More options">
                   <MoreHorizontal size={19} />
                 </button>
-                <button className={`primary-button ${canExportEngagementDetails ? "" : "disabled"}`} disabled={!canExportEngagementDetails || isExporting} onClick={handleExport}>
+                <button className={`primary-button ${canExportSections ? "" : "disabled"}`} disabled={!canExportSections || isExporting} onClick={handleExport}>
                   {isExporting ? "Exporting" : "Export"}
                   <ChevronDown size={16} />
                 </button>
