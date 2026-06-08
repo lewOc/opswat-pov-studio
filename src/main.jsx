@@ -431,7 +431,7 @@ function hydrateSectionDataFromIntake(template, data, intake) {
   if (template.exportKey === "sections.executiveSummary") {
     return {
       ...data,
-      notes: [intake.customer && `Customer: ${intake.customer}`, intake.industry && `Industry: ${intake.industry}`, intake.challenges && `Business challenges: ${intake.challenges}`, intake.products && `Products in scope: ${intake.products}`, intake.compliance && `Compliance drivers: ${intake.compliance}`]
+      notes: [intake.customer && `Customer: ${intake.customer}`, intake.industry && `Industry: ${intake.industry}`, intake.challenges && `Business challenges: ${intake.challenges}`, intake.useCases && `Use cases discussed: ${intake.useCases}`, intake.products && `Products in scope: ${intake.products}`, intake.compliance && `Compliance drivers: ${intake.compliance}`]
         .filter(Boolean)
         .join("\n")
     };
@@ -459,6 +459,19 @@ function hydrateSectionDataFromIntake(template, data, intake) {
           ? { ...row, Details: `Compliance drivers: ${intake.compliance}` }
           : row
       )
+    };
+  }
+  if (template.exportKey === "sections.useCases") {
+    const useCases = splitIntakeList(intake.useCases);
+    if (!useCases.length) return data;
+    return {
+      ...data,
+      rows: useCases.map((useCase, index) => ({
+        ID: `UC-${index + 1}`,
+        "Use Case": useCase,
+        Description: "",
+        "Product(s)": intake.products || ""
+      }))
     };
   }
   return data;
@@ -803,6 +816,7 @@ const emptyIntake = {
   industry: "",
   products: "",
   challenges: "",
+  useCases: "",
   compliance: "",
   startDate: "",
   endDate: "",
@@ -870,7 +884,8 @@ function applyGeneratedSection(sectionId, payload, updateSectionData) {
 }
 
 function App() {
-  const [assistantMode, setAssistantMode] = useState("generate");
+  const [documentStage, setDocumentStage] = useState("start");
+  const [isContextEditing, setIsContextEditing] = useState(false);
   const [activeLibraryGroup, setActiveLibraryGroup] = useState("setup");
   const [sections, setSections] = useState([]);
   const [activeSectionId, setActiveSectionId] = useState(null);
@@ -888,6 +903,7 @@ function App() {
   const canExportSections = sections.length > 0;
   const [isGenerating, setIsGenerating] = useState(false);
   const [assistantMessage, setAssistantMessage] = useState("");
+  const projectTitle = intake.customer.trim() ? `${intake.customer} PoV` : "New PoV";
 
   function createSection(template) {
     const id = template.repeatable ? `${template.section}-${crypto.randomUUID()}` : template.section;
@@ -989,6 +1005,11 @@ function App() {
     setIntake((current) => ({ ...current, [field]: value }));
   }
 
+  function enterEditor() {
+    setDocumentStage("editor");
+    setIsContextEditing(false);
+  }
+
   async function handleGenerateSection() {
     if (!activeSection || !canGenerateActiveSection || isGenerating) return;
     setIsGenerating(true);
@@ -1057,8 +1078,8 @@ function App() {
             <button className="icon-button" aria-label="Back">
               <ArrowLeft size={19} />
             </button>
-            <h1>New PoV</h1>
-            <span className="version-pill">Structured Draft</span>
+            <h1>{projectTitle}</h1>
+            <span className="version-pill">{documentStage === "editor" ? "Structured Draft" : "Document Setup"}</span>
           </div>
           <div className="top-actions">
             <label className="environment-select">
@@ -1085,6 +1106,16 @@ function App() {
           </div>
         </header>
 
+        {documentStage !== "editor" ? (
+          <DocumentSetup
+            intake={intake}
+            onBack={() => setDocumentStage("start")}
+            onChange={updateIntake}
+            onCreate={() => setDocumentStage("context")}
+            onSubmit={enterEditor}
+            stage={documentStage}
+          />
+        ) : (
         <section className="editor">
           <div className="editor-main">
             <div className="toolbar">
@@ -1168,25 +1199,27 @@ function App() {
                 <Bot size={22} />
               </span>
               <div>
-                <h2>AI Draft Assistant</h2>
-                <p>{canGenerateActiveSection ? "RAG-ready for selected section" : aiReadiness.reason}</p>
+                <h2>PoV Context</h2>
+                <p>{canGenerateActiveSection ? "Selected section can use this context" : aiReadiness.reason}</p>
               </div>
             </div>
-            <div className="mode-tabs">
-              <button className={assistantMode === "generate" ? "active" : ""} onClick={() => setAssistantMode("generate")}>
-                Generate
-              </button>
-              <button className={assistantMode === "improve" ? "active" : ""} onClick={() => setAssistantMode("improve")}>
-                Improve
-              </button>
-            </div>
+            {isContextEditing ? (
+              <PovContextForm
+                compact
+                intake={intake}
+                onBack={() => setIsContextEditing(false)}
+                onChange={updateIntake}
+                onSubmit={() => setIsContextEditing(false)}
+              />
+            ) : (
+              <ContextSummary intake={intake} onEdit={() => setIsContextEditing(true)} />
+            )}
             <div className="assistant-copy">
-              <strong>{assistantMode === "generate" ? "Generate selected section" : "Improve selected section"}</strong>
+              <strong>Generate selected section</strong>
               <span>{activeSection ? activeSection.title : "No section selected"}</span>
             </div>
-            <IntakePanel intake={intake} onChange={updateIntake} />
             <button className={`generate-button ${canGenerateActiveSection ? "" : "disabled"}`} disabled={!canGenerateActiveSection || isGenerating} onClick={handleGenerateSection}>
-              {isGenerating ? "Generating Section" : "Generate Section"}
+              {isGenerating ? "Generating Section" : "Generate With Context"}
               <WandSparkles size={18} />
             </button>
             {assistantMessage && <div className={`assistant-message ${assistantMessage.includes("unavailable") || assistantMessage.includes("failed") ? "error" : ""}`}>{assistantMessage}</div>}
@@ -1207,12 +1240,13 @@ function App() {
             <div className="tip-box neutral">
               <Sparkles size={18} />
               <div>
-                <strong>Section-aware drafting</strong>
-                <p>Executive Summary drafts full prose, Products drafts purpose cells, and Customer Environment drafts the overview only.</p>
+                <strong>Context-aware drafting</strong>
+                <p>Customer details, use cases, products, compliance drivers, and tone are sent with future AI operations.</p>
               </div>
             </div>
           </aside>
         </section>
+        )}
       </main>
     </div>
   );
@@ -1270,6 +1304,143 @@ function SectionLibrary({ activeGroup, addedSectionIds, onAddSection, onDragStar
         <ChevronDown size={16} />
       </button>
     </aside>
+  );
+}
+
+function DocumentSetup({ intake, onBack, onChange, onCreate, onSubmit, stage }) {
+  if (stage === "start") {
+    return (
+      <section className="document-setup">
+        <div className="setup-start">
+          <span className="setup-icon">
+            <FileText size={32} />
+          </span>
+          <div>
+            <h2>Create a customer PoV document</h2>
+            <p>Start by capturing the customer context that will guide section suggestions, AI drafting, diagrams, and final export.</p>
+          </div>
+          <button className="primary-button setup-create" onClick={onCreate}>
+            <Plus size={18} />
+            Create New Document
+          </button>
+        </div>
+      </section>
+    );
+  }
+
+  return (
+    <section className="document-setup">
+      <div className="setup-form-panel">
+        <div className="setup-form-heading">
+          <div>
+            <h2>PoV Context</h2>
+            <p>This context will travel with every future AI operation in the document.</p>
+          </div>
+          <button className="secondary-button" onClick={onBack}>
+            <ArrowLeft size={16} />
+            Back
+          </button>
+        </div>
+        <PovContextForm intake={intake} onBack={onBack} onChange={onChange} onSubmit={onSubmit} />
+      </div>
+    </section>
+  );
+}
+
+function PovContextForm({ compact = false, intake, onBack, onChange, onSubmit }) {
+  const shortFields = [
+    ["customer", "Customer"],
+    ["industry", "Industry"],
+    ["products", "Products in scope"],
+    ["compliance", "Compliance drivers"],
+    ["startDate", "PoV start date"],
+    ["endDate", "PoV end date"],
+    ["accountExecutive", "Account Executive"],
+    ["solutionsEngineer", "Solutions Engineer"]
+  ];
+  const longFields = [
+    ["challenges", "Business challenges"],
+    ["useCases", "Use cases discussed"]
+  ];
+
+  return (
+    <div className={`context-form ${compact ? "compact" : ""}`}>
+      <div className="context-form-grid">
+        {shortFields.map(([field, label]) => (
+          <label className="field" key={field}>
+            <span>{label}</span>
+            <div className="input-shell">
+              <Box size={17} />
+              <input aria-label={label} value={intake[field]} onChange={(event) => onChange(field, event.target.value)} />
+            </div>
+          </label>
+        ))}
+      </div>
+      {longFields.map(([field, label]) => (
+        <label className="field wide" key={field}>
+          <span>{label}</span>
+          <div className="input-shell textarea-shell">
+            <Box size={17} />
+            <textarea aria-label={label} value={intake[field]} onChange={(event) => onChange(field, event.target.value)} />
+          </div>
+        </label>
+      ))}
+      <label className="field">
+        <span>Tone</span>
+        <select value={intake.tone} onChange={(event) => onChange("tone", event.target.value)}>
+          <option value="">None</option>
+          <option>Professional</option>
+          <option>Executive</option>
+          <option>Technical</option>
+        </select>
+      </label>
+      <div className="context-form-actions">
+        {compact && (
+          <button className="secondary-button" onClick={onBack}>
+            Cancel
+          </button>
+        )}
+        <button className="primary-button" onClick={onSubmit}>
+          {compact ? "Save Context" : "Continue to Editor"}
+          <ChevronDown size={16} />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function ContextSummary({ intake, onEdit }) {
+  const summaryItems = [
+    ["Customer", intake.customer],
+    ["Industry", intake.industry],
+    ["Products", intake.products],
+    ["Use cases", intake.useCases],
+    ["Compliance", intake.compliance],
+    ["Tone", intake.tone]
+  ].filter(([, value]) => value?.trim());
+
+  return (
+    <div className="context-summary">
+      <div className="context-summary-head">
+        <strong>{intake.customer || "Untitled PoV"}</strong>
+        <button className="secondary-button compact-text" onClick={onEdit}>
+          <Pencil size={15} />
+          Edit
+        </button>
+      </div>
+      {summaryItems.length ? (
+        <div className="context-summary-list">
+          {summaryItems.map(([label, value]) => (
+            <div key={label}>
+              <span>{label}</span>
+              <p>{value}</p>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="context-empty">Add customer context before generating section content.</p>
+      )}
+    </div>
   );
 }
 
@@ -1694,51 +1865,6 @@ function AppendixEditor({ section, onUpdate }) {
           <textarea value={section.data[field]} onChange={(event) => onUpdate(section.id, { ...section.data, [field]: event.target.value })} />
         </label>
       ))}
-    </div>
-  );
-}
-
-function IntakePanel({ intake, onChange }) {
-  const fields = [
-    ["customer", "Customer"],
-    ["industry", "Industry"],
-    ["products", "Products in scope"],
-    ["challenges", "Business challenges"],
-    ["compliance", "Compliance drivers"],
-    ["startDate", "PoV start date"],
-    ["endDate", "PoV end date"],
-    ["accountExecutive", "Account Executive"],
-    ["solutionsEngineer", "Solutions Engineer"]
-  ];
-
-  return (
-    <div className="intake-panel">
-      <div className="product-scope empty-scope">
-        <article>
-          <span>
-            <strong>PoV Intake</strong>
-            <em>Inputs entered here can populate relevant sections later.</em>
-          </span>
-        </article>
-      </div>
-      {fields.map(([field, label]) => (
-        <label className="field" key={field}>
-          <span>{label}</span>
-          <div className="input-shell">
-            <Box size={17} />
-            <input aria-label={label} value={intake[field]} onChange={(event) => onChange(field, event.target.value)} />
-          </div>
-        </label>
-      ))}
-      <label className="field">
-        <span>Tone</span>
-        <select value={intake.tone} onChange={(event) => onChange("tone", event.target.value)}>
-          <option value="">None</option>
-          <option>Professional</option>
-          <option>Executive</option>
-          <option>Technical</option>
-        </select>
-      </label>
     </div>
   );
 }
