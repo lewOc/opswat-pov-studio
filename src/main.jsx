@@ -306,8 +306,9 @@ function App() {
     if (!template || (!template.repeatable && addedSectionIds.has(sectionId))) return;
     const nextSection = attachSectionTemplate(createSectionModel(template, povContext), iconForTemplate);
     setSections((current) => {
+      if (!template.repeatable && current.some((section) => section.template.section === sectionId)) return current;
       const next = [...current];
-      next.splice(insertIndex, 0, nextSection);
+      next.splice(Math.min(insertIndex, next.length), 0, nextSection);
       return next;
     });
     setActiveSectionId(nextSection.id);
@@ -355,6 +356,7 @@ function App() {
 
   function handleDocumentDrop(event) {
     event.preventDefault();
+    event.stopPropagation();
     setIsDropActive(false);
     const sectionId = event.dataTransfer.getData("application/x-pov-section");
     if (sectionId) addSection(sectionId);
@@ -368,14 +370,18 @@ function App() {
 
   function handleRowDrop(event, targetIndex) {
     event.preventDefault();
-    const sourceIndex = Number(event.dataTransfer.getData("application/x-pov-row-index"));
+    event.stopPropagation();
+    const sourceIndexData = event.dataTransfer.getData("application/x-pov-row-index");
+    const sourceIndex = sourceIndexData === "" ? NaN : Number(sourceIndexData);
     if (Number.isInteger(sourceIndex)) moveSection(sourceIndex, targetIndex);
     setDraggedSectionId(null);
   }
 
   function handleDropToEnd(event) {
     event.preventDefault();
-    const sourceIndex = Number(event.dataTransfer.getData("application/x-pov-row-index"));
+    event.stopPropagation();
+    const sourceIndexData = event.dataTransfer.getData("application/x-pov-row-index");
+    const sourceIndex = sourceIndexData === "" ? NaN : Number(sourceIndexData);
     const sectionId = event.dataTransfer.getData("application/x-pov-section");
     if (Number.isInteger(sourceIndex)) moveSection(sourceIndex, sections.length - 1);
     if (sectionId) addSection(sectionId);
@@ -638,7 +644,14 @@ function App() {
                           section={section}
                         />
                       ))}
-                      <div className="drop-to-end" onDragOver={(event) => event.preventDefault()} onDrop={handleDropToEnd}>
+                      <div
+                        className="drop-to-end"
+                        onDragOver={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                        }}
+                        onDrop={handleDropToEnd}
+                      >
                         Drop here to add another section
                       </div>
                     </div>
@@ -954,7 +967,10 @@ function SectionRow({ active, dragging, index, onClick, onDragStart, onDrop, onR
     <article
       className={`section-row ${active ? "active" : ""} ${dragging ? "dragging" : ""}`}
       onClick={onClick}
-      onDragOver={(event) => event.preventDefault()}
+      onDragOver={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      }}
       onDrop={onDrop}
     >
       <div className="row-top">
