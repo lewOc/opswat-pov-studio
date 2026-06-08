@@ -96,7 +96,15 @@ export const sectionTemplates = [
     exportKey: "sections.scope",
     purpose: "Define what the PoV will and will not cover.",
     requiredFields: ["In-scope items", "Out-of-scope items"],
-    lists: ["In Scope", "Out of Scope"]
+    lists: ["In Scope", "Out of Scope"],
+    ai: {
+      mode: "checklist",
+      target: "lists",
+      maxItemsPerList: 5,
+      instructions:
+        "Generate concise PoV scope boundaries as checklist items. In Scope should describe the validation work OPSWAT will perform. Out of Scope should prevent overreach, production rollout assumptions, and unrelated integrations.",
+      outputLists: ["In Scope", "Out of Scope"]
+    }
   },
   {
     group: "plan",
@@ -120,7 +128,15 @@ export const sectionTemplates = [
     exportKey: "sections.timelineMilestones",
     purpose: "Define PoV phases, activities, descriptions, and target dates.",
     requiredFields: ["Phase", "Activity", "Description", "Target Date"],
-    columns: ["Phase", "Activity", "Description", "Target Date"]
+    columns: ["Phase", "Activity", "Description", "Target Date"],
+    ai: {
+      mode: "table",
+      target: "rows",
+      maxRows: 5,
+      instructions:
+        "Generate a concise PoV delivery timeline as table rows. Use the supplied start/end dates when available. Keep activities practical and tied to scope, validation, review, and close-out.",
+      outputColumns: ["Phase", "Activity", "Description", "Target Date"]
+    }
   },
   {
     group: "plan",
@@ -353,6 +369,7 @@ export const conciseGenerationGuidance = {
     "Only write content needed for the selected PoV section.",
     "Prefer short bullets or compact table entries over long prose.",
     "When the section is a table, return table rows that match the requested columns.",
+    "When the section is a checklist, return checklist items grouped by the requested list names.",
     "Focus on the proof-of-value task, validation steps, success measures, and customer context.",
     "Avoid broad marketing copy, long product background, and repeated context already captured elsewhere.",
     "Do not generate a full-document narrative when a single section is requested."
@@ -521,6 +538,12 @@ export function getAiReadiness(section, povContext) {
   if (section.template.exportKey === "sections.successCriteria" && !povContext.useCases.trim() && !povContext.challenges.trim()) {
     return { ready: false, reason: "Add use cases or business challenges before generating success criteria." };
   }
+  if (section.template.exportKey === "sections.scope" && !povContext.useCases.trim() && !povContext.challenges.trim()) {
+    return { ready: false, reason: "Add use cases or business challenges before generating scope boundaries." };
+  }
+  if (section.template.exportKey === "sections.timelineMilestones" && !povContext.useCases.trim() && !povContext.challenges.trim()) {
+    return { ready: false, reason: "Add use cases or business challenges before generating a PoV timeline." };
+  }
   return { ready: true, reason: "Ready to generate this section." };
 }
 
@@ -533,6 +556,7 @@ export function serializeSection(section) {
     type: section.template.type,
     ai: section.template.ai,
     columns: section.template.columns || [],
+    lists: section.template.lists || [],
     data: section.data
   };
 }

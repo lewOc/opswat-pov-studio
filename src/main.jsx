@@ -148,6 +148,14 @@ function applyGeneratedSection(sectionId, payload, updateSectionData) {
         citations: payload.citations || []
       };
     }
+    if (payload.target === "lists" && payload.lists && typeof payload.lists === "object") {
+      const lists = normalizeGeneratedLists(payload.lists, Object.keys(current.lists || {}));
+      return {
+        ...current,
+        lists: Object.keys(lists).length ? lists : current.lists,
+        citations: payload.citations || []
+      };
+    }
     return current;
   });
 }
@@ -170,6 +178,19 @@ function normalizeGeneratedRows(rows, columns) {
       );
     })
     .filter((row) => row && Object.values(row).some((value) => String(value || "").trim()));
+}
+
+function normalizeGeneratedLists(lists, listNames) {
+  if (!lists || typeof lists !== "object" || !listNames.length) return {};
+  const entries = Object.entries(lists);
+  return Object.fromEntries(
+    listNames.map((listName) => {
+      const direct = lists[listName];
+      const loose = entries.find(([key]) => key.toLowerCase().replace(/[^a-z0-9]/g, "") === listName.toLowerCase().replace(/[^a-z0-9]/g, ""));
+      const items = Array.isArray(direct ?? loose?.[1]) ? direct ?? loose?.[1] : [];
+      return [listName, items.map((item) => compactText(item, 160)).filter(Boolean).slice(0, 5)];
+    })
+  );
 }
 
 function compactText(value, maxLength = 120) {
