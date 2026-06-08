@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.wrangler/
+
+.DS_Store
+*.log
+*.local
+.env
+.env.*
+
+pov-studio-dist.zip
