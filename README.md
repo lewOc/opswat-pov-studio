@@ -47,6 +47,17 @@ The browser calls `/api/generate-section` in this app. That Cloudflare Pages
 Function proxies to the shared RAG service, so Anthropic keys and RAG access
 tokens stay out of the browser.
 
+For local development, Vite provides a deterministic `/api/generate-section`
+fallback so section workflows can be tested without a deployed RAG service.
+It also proxies API calls to the internal API host:
+
+```text
+192.168.0.184:8010  Account Map API
+192.168.0.184:8020  Diagram API
+192.168.0.184:8030  Relevant Experience API
+192.168.0.184:8050  Product Knowledge API
+```
+
 Required environment variables for generation:
 
 ```bash
