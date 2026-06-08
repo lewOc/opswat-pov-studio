@@ -68,6 +68,13 @@ function useCaseNames(context) {
   return ["Validate the agreed OPSWAT proof-of-value workflow"];
 }
 
+function sentenceList(values, fallback) {
+  const items = values.map((value) => cleanText(value, 90)).filter(Boolean);
+  if (!items.length) return fallback;
+  if (items.length === 1) return items[0];
+  return `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
+}
+
 function generateRows(section, context, productKnowledge) {
   const products = productNames(context, productKnowledge).join(", ") || "OPSWAT product set";
   const useCases = useCaseNames(context);
@@ -192,6 +199,21 @@ function generateDraft(section, context) {
       220
     );
   }
+
+  if (section.exportKey === "sections.executiveSummary") {
+    const customer = context.customer || "the customer";
+    const products = sentenceList(splitList(context.products), "the selected OPSWAT solution");
+    const useCases = sentenceList(useCaseNames(context), "the agreed proof-of-value use cases");
+    const challenge = cleanText(context.challenges, 240) || "the customer's security requirements and operational challenges";
+    const compliance = sentenceList(splitList(context.compliance), "applicable compliance requirements");
+
+    return [
+      `This Proof of Value (PoV) document defines the objectives, scope, success criteria, and evaluation framework for ${customer}'s assessment of ${products}. The engagement is structured to demonstrate measurable value in addressing ${challenge} within ${context.industry || "the target environment"}.`,
+      "Founded in 2002, OPSWAT specializes in the protection of critical infrastructure. Guided by a Zero Trust philosophy, OPSWAT operates on the principle that every file and device represents a potential threat. OPSWAT solutions are designed to enable secure data transfer, controlled device access, malware prevention, and auditable security outcomes across IT and OT environments.",
+      `This PoV will demonstrate how OPSWAT can support ${customer}'s identified risk areas by validating ${useCases}. The output will provide practical evidence against the agreed success criteria while supporting ${compliance}.`
+    ].join("\n\n");
+  }
+
   return cleanText(
     `${context.customer || "The customer"} will use this PoV to validate the agreed OPSWAT use cases, confirm success criteria, and capture clear evidence for the next decision point.`,
     220
