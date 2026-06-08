@@ -116,7 +116,15 @@ export const sectionTemplates = [
     exportKey: "sections.assumptionsDependencies",
     purpose: "Track assumptions that affect PoV timeline or success.",
     requiredFields: ["Assumption / Dependency", "Owner / Notes"],
-    columns: ["Assumption / Dependency", "Owner / Notes"]
+    columns: ["Assumption / Dependency", "Owner / Notes"],
+    ai: {
+      mode: "table",
+      target: "rows",
+      maxRows: 5,
+      instructions:
+        "Generate concise PoV assumptions and dependencies as table rows. Focus on customer-owned access, test data, environment readiness, OPSWAT prerequisites, and review cadence. Keep each cell short.",
+      outputColumns: ["Assumption / Dependency", "Owner / Notes"]
+    }
   },
   {
     group: "plan",
@@ -262,7 +270,15 @@ export const sectionTemplates = [
     exportKey: "sections.technicalPrerequisites",
     purpose: "Collect product prerequisites, network requirements, and pre-kick-off checklist items.",
     requiredFields: ["Product prerequisites", "Network requirements", "General checklist"],
-    lists: ["Product Prerequisites", "Network Requirements", "General Pre-Kick-off Checklist"]
+    lists: ["Product Prerequisites", "Network Requirements", "General Pre-Kick-off Checklist"],
+    ai: {
+      mode: "checklist",
+      target: "lists",
+      maxItemsPerList: 5,
+      instructions:
+        "Generate concise technical prerequisites as checklist items. Use Product Knowledge context when available, but avoid long installation detail. Focus on what must be ready before the PoV starts.",
+      outputLists: ["Product Prerequisites", "Network Requirements", "General Pre-Kick-off Checklist"]
+    }
   },
   {
     group: "deliver",
@@ -543,6 +559,13 @@ export function getAiReadiness(section, povContext) {
   }
   if (section.template.exportKey === "sections.timelineMilestones" && !povContext.useCases.trim() && !povContext.challenges.trim()) {
     return { ready: false, reason: "Add use cases or business challenges before generating a PoV timeline." };
+  }
+  if (section.template.exportKey === "sections.assumptionsDependencies" && !povContext.useCases.trim() && !povContext.challenges.trim()) {
+    return { ready: false, reason: "Add use cases or business challenges before generating assumptions." };
+  }
+  if (section.template.exportKey === "sections.technicalPrerequisites") {
+    const hasProducts = povContext.products.trim() || section.data.lists["Product Prerequisites"]?.some((item) => item.trim());
+    if (!hasProducts) return { ready: false, reason: "Add products in scope before generating technical prerequisites." };
   }
   return { ready: true, reason: "Ready to generate this section." };
 }

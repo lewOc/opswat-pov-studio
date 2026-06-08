@@ -54,7 +54,11 @@ function splitList(value) {
 
 function productNames(context, productKnowledge) {
   const recommended = (productKnowledge || []).map((item) => item.product).filter(Boolean);
-  return [...splitList(context.products), ...recommended].filter(Boolean).slice(0, 4);
+  return [...new Set([...splitList(context.products), ...recommended].filter(Boolean))].slice(0, 4);
+}
+
+function productKnowledgeReasons(productKnowledge) {
+  return Object.fromEntries((productKnowledge || []).map((item) => [item.product, item.reason]).filter(([product]) => product));
 }
 
 function useCaseNames(context) {
@@ -102,6 +106,19 @@ function generateRows(section, context, productKnowledge) {
     }));
   }
 
+  if (section.exportKey === "sections.assumptionsDependencies") {
+    return [
+      ["Customer technical stakeholders are available for PoV workshops and review checkpoints.", "Customer to confirm named contacts before kick-off."],
+      ["Target environment access, test systems, and required accounts are available before validation starts.", "Customer technical owner to provision and verify access."],
+      ["Representative test files, media, or workflows are approved for PoV use.", "Customer to provide sample set and handling constraints."],
+      [`Selected products (${products}) are acceptable for the agreed validation scope.`, "OPSWAT to confirm product fit; customer to confirm scope."],
+      ["Any firewall, proxy, DNS, or routing changes required for the PoV are handled in advance.", "Customer network/security teams to approve changes."]
+    ].map(([AssumptionDependency, OwnerNotes]) => ({
+      "Assumption / Dependency": cleanText(AssumptionDependency, 160),
+      "Owner / Notes": cleanText(OwnerNotes, 160)
+    }));
+  }
+
   if (section.ai?.target === "Purpose / Description") {
     const knowledgeByProduct = Object.fromEntries((productKnowledge || []).map((item) => [item.product, item.reason]));
     return (section.data?.rows || []).map((row) => {
@@ -118,24 +135,54 @@ function generateRows(section, context, productKnowledge) {
   return [];
 }
 
-function generateLists(section, context) {
-  if (section.exportKey !== "sections.scope") return {};
-  const products = productNames(context, []).join(", ") || "selected OPSWAT products";
+function generateLists(section, context, productKnowledge) {
+  const products = productNames(context, productKnowledge);
+  const productText = products.join(", ") || "selected OPSWAT products";
   const firstUseCase = useCaseNames(context)[0];
-  return {
-    "In Scope": [
-      `Validate ${firstUseCase.toLowerCase()}.`,
-      `Configure and test ${products} for the agreed PoV workflow.`,
-      "Capture evidence against agreed success criteria.",
-      "Review results, risks, and recommended next steps."
-    ].map((item) => cleanText(item, 150)),
-    "Out of Scope": [
-      "Production rollout or long-term managed service operation.",
-      "Unrelated integrations not required for the agreed use cases.",
-      "Remediation of customer environment issues outside OPSWAT configuration.",
-      "Commercial negotiation or final procurement approval."
-    ]
-  };
+
+  if (section.exportKey === "sections.scope") {
+    return {
+      "In Scope": [
+        `Validate ${firstUseCase.toLowerCase()}.`,
+        `Configure and test ${productText} for the agreed PoV workflow.`,
+        "Capture evidence against agreed success criteria.",
+        "Review results, risks, and recommended next steps."
+      ].map((item) => cleanText(item, 150)),
+      "Out of Scope": [
+        "Production rollout or long-term managed service operation.",
+        "Unrelated integrations not required for the agreed use cases.",
+        "Remediation of customer environment issues outside OPSWAT configuration.",
+        "Commercial negotiation or final procurement approval."
+      ]
+    };
+  }
+
+  if (section.exportKey === "sections.technicalPrerequisites") {
+    const reasons = productKnowledgeReasons(productKnowledge);
+    const productItems = (products.length ? products : ["Selected OPSWAT products"]).slice(0, 4).map((product) =>
+      cleanText(`${product}: ${reasons[product] || "confirm sizing, version, licensing, and required deployment access."}`, 160)
+    );
+    return {
+      "Product Prerequisites": [
+        ...productItems,
+        "Confirm product versions, licence availability, and administrator access before kick-off."
+      ].slice(0, 5),
+      "Network Requirements": [
+        "Confirm required inbound/outbound connectivity between PoV systems.",
+        "Validate firewall, proxy, DNS, and certificate requirements before testing.",
+        "Confirm access to update services, repositories, or offline update packages.",
+        "Agree any isolation, air-gap, or transfer-boundary constraints."
+      ],
+      "General Pre-Kick-off Checklist": [
+        "Confirm customer technical owner and escalation contact.",
+        "Prepare representative test files, media, and expected validation evidence.",
+        "Agree test window, success criteria, and rollback/cleanup approach.",
+        "Confirm how logs, reports, and screenshots will be shared."
+      ]
+    };
+  }
+
+  return {};
 }
 
 function generateDraft(section, context) {
@@ -161,7 +208,7 @@ function localSectionGeneration(body) {
     return { target, rows: generateRows(section, context, productKnowledge), citations: [], sources: { dev: ["local deterministic generator"] } };
   }
   if (target === "lists") {
-    return { target, lists: generateLists(section, context), citations: [], sources: { dev: ["local deterministic generator"] } };
+    return { target, lists: generateLists(section, context, productKnowledge), citations: [], sources: { dev: ["local deterministic generator"] } };
   }
   return { target, draft: generateDraft(section, context), citations: [], sources: { dev: ["local deterministic generator"] } };
 }
