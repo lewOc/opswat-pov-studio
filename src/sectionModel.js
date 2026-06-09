@@ -84,7 +84,15 @@ export const sectionTemplates = [
     purpose: "Link discovery pain points to measurable value outcomes and evidence sources.",
     requiredFields: ["Business challenge", "Business objective", "KPI / Metric", "Baseline", "Target", "Evidence Source"],
     introLabel: "Business Challenges",
-    columns: ["Business Objective", "KPI / Metric", "Baseline", "Target", "Evidence Source"]
+    columns: ["Business Objective", "KPI / Metric", "Baseline", "Target", "Evidence Source"],
+    ai: {
+      mode: "table",
+      target: "rows",
+      maxRows: 5,
+      instructions:
+        "Generate concise business objectives and value outcomes as table rows. Link customer challenges to measurable PoV outcomes, practical KPIs, baseline assumptions, target evidence, and evidence sources. Keep each cell short.",
+      outputColumns: ["Business Objective", "KPI / Metric", "Baseline", "Target", "Evidence Source"]
+    }
   },
   {
     group: "plan",
@@ -189,7 +197,15 @@ export const sectionTemplates = [
     exportKey: "sections.exitCriteria",
     purpose: "Define pass/fail rubric and early-exit triggers.",
     requiredFields: ["Pass criteria", "Conditional pass criteria", "Fail criteria", "Early-exit triggers"],
-    lists: ["Pass / Fail Rubric", "Early-Exit Triggers"]
+    lists: ["Pass / Fail Rubric", "Early-Exit Triggers"],
+    ai: {
+      mode: "checklist",
+      target: "lists",
+      maxItemsPerList: 5,
+      instructions:
+        "Generate concise pass, conditional pass, fail, and early-exit criteria for the PoV. Keep criteria practical, evidence-based, and tied to the agreed validation scope.",
+      outputLists: ["Pass / Fail Rubric", "Early-Exit Triggers"]
+    }
   },
   {
     group: "validate",
@@ -222,7 +238,15 @@ export const sectionTemplates = [
     purpose: "Define representative test data, source owners, and handling rules.",
     requiredFields: ["Data Set", "Purpose", "Source / Owner", "Handling rules"],
     introLabel: "Volume targets and handling rules",
-    columns: ["Data Set", "Purpose", "Source / Owner"]
+    columns: ["Data Set", "Purpose", "Source / Owner", "Handling Rules"],
+    ai: {
+      mode: "table",
+      target: "rows",
+      maxRows: 5,
+      instructions:
+        "Generate concise test data rows for the PoV. Include representative data sets, purpose, source owner, and safe handling rules. Avoid sensitive detail and keep rows practical.",
+      outputColumns: ["Data Set", "Purpose", "Source / Owner", "Handling Rules"]
+    }
   },
   {
     group: "validate",
@@ -234,7 +258,15 @@ export const sectionTemplates = [
     exportKey: "sections.complianceMapping",
     purpose: "Map customer frameworks and controls to demonstrated OPSWAT capabilities.",
     requiredFields: ["Framework / Regulation", "Control Reference", "OPSWAT Capability", "PoV Criterion #"],
-    columns: ["Framework / Regulation", "Control Reference", "OPSWAT Capability Demonstrated", "PoV Criterion #"]
+    columns: ["Framework / Regulation", "Control Reference", "OPSWAT Capability Demonstrated", "PoV Criterion #"],
+    ai: {
+      mode: "table",
+      target: "rows",
+      maxRows: 5,
+      instructions:
+        "Generate concise compliance mapping rows. Use supplied compliance drivers and Product Knowledge capabilities, and map each row to a practical PoV criterion or use case reference.",
+      outputColumns: ["Framework / Regulation", "Control Reference", "OPSWAT Capability Demonstrated", "PoV Criterion #"]
+    }
   },
   {
     group: "deliver",
@@ -392,7 +424,7 @@ export const conciseGenerationGuidance = {
   ]
 };
 
-const emptyRow = (columns) => Object.fromEntries(columns.map((column) => [column, ""]));
+export const emptyRow = (columns) => Object.fromEntries(columns.map((column) => [column, ""]));
 
 export function templateById(templateId) {
   return sectionTemplates.find((template) => template.exportKey === templateId || template.section === templateId) || null;
@@ -486,6 +518,12 @@ export function hydrateSectionDataFromContext(template, data, povContext) {
       )
     };
   }
+  if (template.exportKey === "sections.businessOutcomes") {
+    return {
+      ...data,
+      intro: [povContext.challenges, povContext.useCases && `Use cases discussed: ${povContext.useCases}`].filter(Boolean).join("\n")
+    };
+  }
   if (template.exportKey === "sections.useCases") {
     const useCases = splitPovList(povContext.useCases);
     if (!useCases.length) return data;
@@ -497,6 +535,12 @@ export function hydrateSectionDataFromContext(template, data, povContext) {
         Description: "",
         "Product(s)": povContext.products || ""
       }))
+    };
+  }
+  if (template.exportKey === "sections.testData") {
+    return {
+      ...data,
+      intro: [povContext.useCases && `Representative data should support: ${povContext.useCases}`, "Use only approved test files, sample media, or synthetic data agreed for the PoV."].filter(Boolean).join(" ")
     };
   }
   return data;
@@ -556,6 +600,18 @@ export function getAiReadiness(section, povContext) {
   }
   if (section.template.exportKey === "sections.scope" && !povContext.useCases.trim() && !povContext.challenges.trim()) {
     return { ready: false, reason: "Add use cases or business challenges before generating scope boundaries." };
+  }
+  if (section.template.exportKey === "sections.businessOutcomes" && !povContext.challenges.trim() && !povContext.useCases.trim()) {
+    return { ready: false, reason: "Add business challenges or use cases before generating value outcomes." };
+  }
+  if (section.template.exportKey === "sections.exitCriteria" && !povContext.useCases.trim() && !povContext.challenges.trim()) {
+    return { ready: false, reason: "Add use cases or business challenges before generating exit criteria." };
+  }
+  if (section.template.exportKey === "sections.testData" && !povContext.useCases.trim() && !povContext.challenges.trim()) {
+    return { ready: false, reason: "Add use cases or business challenges before generating test data." };
+  }
+  if (section.template.exportKey === "sections.complianceMapping" && !povContext.compliance.trim() && !povContext.useCases.trim()) {
+    return { ready: false, reason: "Add compliance drivers or use cases before generating compliance mapping." };
   }
   if (section.template.exportKey === "sections.timelineMilestones" && !povContext.useCases.trim() && !povContext.challenges.trim()) {
     return { ready: false, reason: "Add use cases or business challenges before generating a PoV timeline." };

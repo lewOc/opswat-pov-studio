@@ -6,6 +6,7 @@ import {
   Blocks,
   Bot,
   Box,
+  Check,
   ChevronDown,
   ClipboardCheck,
   Clock3,
@@ -46,6 +47,7 @@ import {
   attachSectionTemplate,
   conciseGenerationGuidance,
   createSection as createSectionModel,
+  emptyRow,
   emptyPovContext,
   getAiPlan,
   getAiReadiness,
@@ -193,6 +195,30 @@ function normalizeGeneratedLists(lists, listNames) {
   );
 }
 
+function hasPendingGeneration(section) {
+  return Boolean(section?.generatedContent?.pending);
+}
+
+function isUseCasesSection(section) {
+  return section?.template?.exportKey === "sections.useCases";
+}
+
+function generatedPreviewSummary(payload) {
+  if (!payload) return "Generated preview";
+  if (payload.target === "rows") return `${payload.rows?.length || 0} table row(s)`;
+  if (payload.target === "lists") return `${Object.values(payload.lists || {}).flat().filter(Boolean).length} checklist item(s)`;
+  if (payload.target === "Purpose / Description") return `${payload.rows?.length || 0} product description(s)`;
+  return compactText(payload.draft || "", 80) || "Generated draft";
+}
+
+function nextUseCaseId(rows = []) {
+  const maxId = rows.reduce((max, row) => {
+    const match = String(row.ID || "").match(/^UC-(\d+)$/i);
+    return match ? Math.max(max, Number(match[1])) : max;
+  }, 0);
+  return `UC-${maxId + 1 || rows.length + 1}`;
+}
+
 function compactText(value, maxLength = 120) {
   const text = String(value || "").replace(/\s+/g, " ").trim();
   if (text.length <= maxLength) return text;
@@ -278,6 +304,9 @@ function App() {
   const [isProductKnowledgeLoading, setIsProductKnowledgeLoading] = useState(false);
   const [productKnowledgeMessage, setProductKnowledgeMessage] = useState("");
   const [isExporting, setIsExporting] = useState(false);
+  const [isUseCaseSuggestionsLoading, setIsUseCaseSuggestionsLoading] = useState(false);
+  const [useCaseSuggestions, setUseCaseSuggestions] = useState(null);
+  const [useCaseSuggestionMessage, setUseCaseSuggestionMessage] = useState("");
 
   const activeSection = sections.find((section) => section.id === activeSectionId) || null;
   const hydratedTemplates = useMemo(() => sectionTemplates.map(withTemplateIcons), []);
@@ -337,6 +366,19 @@ function App() {
               ...section,
               data: typeof updater === "function" ? updater(section.data) : updater,
               reviewState: "In progress"
+            }
+          : section
+      )
+    );
+  }
+
+  function updateSectionGeneration(sectionId, updater) {
+    setSections((current) =>
+      current.map((section) =>
+        section.id === sectionId
+          ? {
+              ...section,
+              generatedContent: typeof updater === "function" ? updater(section.generatedContent || {}) : updater
             }
           : section
       )
@@ -469,6 +511,73 @@ function App() {
     setActiveSectionId(template.section);
   }
 
+  async function handleSuggestUseCases() {
+    if (!isUseCasesSection(activeSection) || isUseCaseSuggestionsLoading) return;
+    setIsUseCaseSuggestionsLoading(true);
+    setUseCaseSuggestionMessage("");
+    try {
+      const response = await fetch("/api/generate-section", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          section: serializeSection(activeSection),
+          intake: povContext,
+          povContext,
+          productKnowledge: summarizeProductKnowledge(productKnowledge),
+          generationGuidance: {
+            ...conciseGenerationGuidance,
+            maxWords: 100,
+            rules: [
+              ...conciseGenerationGuidance.rules,
+              "Return suggested validation use cases only. Do not replace the user's existing table unless they choose to add a suggestion."
+            ]
+          }
+        })
+      });
+      const payload = await readJsonResponse(response, "Use case suggestions are not configured for this local environment.");
+      if (!response.ok) throw new Error(payload.error || "Use case suggestion lookup failed.");
+      const rows = normalizeGeneratedRows(payload.rows || [], activeSection.template.columns || []);
+      setUseCaseSuggestions({
+        generatedAt: new Date().toISOString(),
+        rows,
+        citations: payload.citations || [],
+        sources: payload.sources || {}
+      });
+      setUseCaseSuggestionMessage(rows.length ? `${rows.length} suggested use case(s) ready.` : "No use case suggestions were returned for this context.");
+    } catch (error) {
+      setUseCaseSuggestionMessage(error.message || "Use case suggestions are unavailable.");
+    } finally {
+      setIsUseCaseSuggestionsLoading(false);
+    }
+  }
+
+  function handleAddUseCaseSuggestion(suggestion, suggestionIndex) {
+    if (!isUseCasesSection(activeSection)) return;
+    updateSectionData(activeSection.id, (current) => {
+      const nextId = nextUseCaseId(current.rows);
+      return {
+        ...current,
+        rows: [
+          ...current.rows,
+          {
+            ...emptyRow(activeSection.template.columns),
+            ...suggestion,
+            ID: nextId,
+            "Product(s)": suggestion["Product(s)"] || povContext.products || ""
+          }
+        ]
+      };
+    });
+    setUseCaseSuggestions((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        rows: current.rows.filter((_, index) => index !== suggestionIndex)
+      };
+    });
+    setUseCaseSuggestionMessage("Use case added to the validation table.");
+  }
+
   async function handleGenerateSection() {
     if (!activeSection || !canGenerateActiveSection || isGenerating) return;
     setIsGenerating(true);
@@ -487,13 +596,44 @@ function App() {
       });
       const payload = await readJsonResponse(response, "AI generation is not configured for this local environment.");
       if (!response.ok) throw new Error(payload.error || "AI generation failed.");
-      applyGeneratedSection(activeSection.id, payload, updateSectionData);
-      setAssistantMessage(payload.citations?.length ? `Draft generated with ${payload.citations.length} retrieved source reference(s).` : "Draft generated.");
+      updateSectionGeneration(activeSection.id, (current) => ({
+        ...current,
+        pending: {
+          ...payload,
+          generatedAt: new Date().toISOString()
+        }
+      }));
+      setAssistantMessage(payload.citations?.length ? `Preview ready with ${payload.citations.length} retrieved source reference(s).` : "Preview ready.");
     } catch (error) {
       setAssistantMessage(error.message || "AI generation is unavailable.");
     } finally {
       setIsGenerating(false);
     }
+  }
+
+  function handleAcceptGeneratedSection() {
+    if (!activeSection?.generatedContent?.pending) return;
+    applyGeneratedSection(activeSection.id, activeSection.generatedContent.pending, updateSectionData);
+    updateSectionGeneration(activeSection.id, (current) => ({
+      ...current,
+      lastAccepted: {
+        acceptedAt: new Date().toISOString(),
+        summary: generatedPreviewSummary(current.pending),
+        citations: current.pending?.citations || [],
+        sources: current.pending?.sources || {}
+      },
+      pending: null
+    }));
+    setAssistantMessage("Generated content accepted into the selected section.");
+  }
+
+  function handleDiscardGeneratedSection() {
+    if (!activeSection?.generatedContent?.pending) return;
+    updateSectionGeneration(activeSection.id, (current) => ({
+      ...current,
+      pending: null
+    }));
+    setAssistantMessage("Generated preview discarded.");
   }
 
   async function handleExport() {
@@ -655,7 +795,7 @@ function App() {
                         Drop here to add another section
                       </div>
                     </div>
-                    <SectionEditor section={activeSection} onUpdate={updateSectionData} />
+                    <SectionEditor section={activeSection} onRequestUseCaseSuggestions={handleSuggestUseCases} onUpdate={updateSectionData} />
                   </div>
                 )}
               </section>
@@ -690,15 +830,30 @@ function App() {
               onSuggest={handleSuggestProductFit}
               recommendations={productKnowledge?.recommendations || []}
             />
+            {isUseCasesSection(activeSection) && (
+              <UseCaseSuggestionPanel
+                citations={useCaseSuggestions?.citations || []}
+                isLoading={isUseCaseSuggestionsLoading}
+                message={useCaseSuggestionMessage}
+                onAdd={handleAddUseCaseSuggestion}
+                onSuggest={handleSuggestUseCases}
+                suggestions={useCaseSuggestions?.rows || []}
+              />
+            )}
             <div className="assistant-copy">
               <strong>Generate selected section</strong>
               <span>{activeSection ? activeSection.title : "No section selected"}</span>
             </div>
             <button className={`generate-button ${canGenerateActiveSection ? "" : "disabled"}`} disabled={!canGenerateActiveSection || isGenerating} onClick={handleGenerateSection}>
-              {isGenerating ? "Generating Section" : "Generate With Context"}
+              {isGenerating ? "Generating Section" : hasPendingGeneration(activeSection) ? "Regenerate Preview" : "Generate With Context"}
               <WandSparkles size={18} />
             </button>
             {assistantMessage && <div className={`assistant-message ${assistantMessage.includes("unavailable") || assistantMessage.includes("failed") ? "error" : ""}`}>{assistantMessage}</div>}
+            <GenerationReviewPanel
+              pending={activeSection?.generatedContent?.pending}
+              onAccept={handleAcceptGeneratedSection}
+              onDiscard={handleDiscardGeneratedSection}
+            />
             <div className="assistant-actions">
               <button disabled>
                 <Sparkles size={16} />
@@ -963,6 +1118,7 @@ function ProductKnowledgePanel({ isLoading, message, onApply, onSuggest, recomme
 function SectionRow({ active, dragging, index, onClick, onDragStart, onDrop, onRemove, section }) {
   const Icon = section.icon;
   const hasInput = hasSectionInput(section);
+  const pendingGeneration = hasPendingGeneration(section);
   return (
     <article
       className={`section-row ${active ? "active" : ""} ${dragging ? "dragging" : ""}`}
@@ -984,7 +1140,7 @@ function SectionRow({ active, dragging, index, onClick, onDragStart, onDrop, onR
             Template {section.template.section} · {section.template.type} · {section.template.exportKey}
           </span>
         </div>
-        <span className={`review-pill ${hasInput ? "started" : ""}`}>{hasInput ? "Input" : "Empty"}</span>
+        <span className={`review-pill ${pendingGeneration ? "review" : hasInput ? "started" : ""}`}>{pendingGeneration ? "Review" : hasInput ? "Input" : "Empty"}</span>
         <span className="status pending">
           <Icon size={17} />
         </span>
@@ -1005,7 +1161,112 @@ function SectionRow({ active, dragging, index, onClick, onDragStart, onDrop, onR
   );
 }
 
-function SectionEditor({ section, onUpdate }) {
+function GenerationReviewPanel({ onAccept, onDiscard, pending }) {
+  if (!pending) {
+    return (
+      <div className="generation-review empty">
+        <ClipboardCheck size={18} />
+        <div>
+          <strong>No pending preview</strong>
+          <p>Generated content will appear here before it is added to the document.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const citations = pending.citations || [];
+  const sources = pending.sources || {};
+  const sourceLabels = [
+    ...(sources.productKnowledge || []).map((item) => `Product Knowledge: ${item}`),
+    ...(sources.relevantExperience || []).map((item) => `Relevant Experience: ${item}`),
+    ...(sources.fallback || []).map((item) => `Formatter: ${item}`)
+  ];
+
+  return (
+    <div className="generation-review">
+      <div className="generation-review-head">
+        <div>
+          <strong>Review generated preview</strong>
+          <span>{generatedPreviewSummary(pending)}</span>
+        </div>
+        <span className="citation-count">{citations.length} source(s)</span>
+      </div>
+      <GeneratedPreview payload={pending} />
+      {sourceLabels.length > 0 && (
+        <div className="generation-source-list">
+          {sourceLabels.slice(0, 4).map((label) => (
+            <span key={label}>{label}</span>
+          ))}
+        </div>
+      )}
+      {citations.length > 0 && (
+        <details className="citation-drawer">
+          <summary>Evidence references</summary>
+          <div>
+            {citations.slice(0, 5).map((citation, index) => (
+              <article key={`${citation.title}-${index}`}>
+                <strong>{citation.type || "Source"}</strong>
+                <p>{citation.title}</p>
+                {citation.source && <span>{citation.source}</span>}
+              </article>
+            ))}
+          </div>
+        </details>
+      )}
+      <div className="generation-review-actions">
+        <button className="secondary-button" onClick={onDiscard}>
+          <Trash2 size={15} />
+          Discard
+        </button>
+        <button className="primary-button" onClick={onAccept}>
+          <Check size={16} />
+          Accept into section
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function GeneratedPreview({ payload }) {
+  if (payload.target === "lists" && payload.lists) {
+    return (
+      <div className="generated-preview">
+        {Object.entries(payload.lists).map(([listName, items]) => (
+          <div className="generated-list-preview" key={listName}>
+            <strong>{listName}</strong>
+            <ul>
+              {items.slice(0, 5).map((item, index) => (
+                <li key={`${item}-${index}`}>{item}</li>
+              ))}
+            </ul>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if ((payload.target === "rows" || payload.target === "Purpose / Description") && Array.isArray(payload.rows)) {
+    const columns = Object.keys(payload.rows[0] || {}).slice(0, 4);
+    return (
+      <div className="generated-preview table-preview">
+        {payload.rows.slice(0, 5).map((row, index) => (
+          <article key={index}>
+            {columns.map((column) => (
+              <p key={column}>
+                <span>{column}</span>
+                {row[column]}
+              </p>
+            ))}
+          </article>
+        ))}
+      </div>
+    );
+  }
+
+  return <p className="generated-draft-preview">{payload.draft || "No draft text returned."}</p>;
+}
+
+function SectionEditor({ onRequestUseCaseSuggestions, section, onUpdate }) {
   if (!section) {
     return (
       <div className="section-editor empty-editor">
@@ -1042,11 +1303,63 @@ function SectionEditor({ section, onUpdate }) {
       {template.type === "narrative" && <NarrativeEditor section={section} onUpdate={onUpdate} />}
       {template.type === "diagram" && <DiagramEditor section={section} onUpdate={onUpdate} />}
       {(template.type === "table" || template.type === "timeline" || template.type === "matrix") && (
-        <TableSectionEditor section={section} onUpdate={onUpdate} />
+        <TableSectionEditor onRequestUseCaseSuggestions={onRequestUseCaseSuggestions} section={section} onUpdate={onUpdate} />
       )}
       {template.type === "checklist" && <ChecklistEditor section={section} onUpdate={onUpdate} />}
       {template.type === "signoff" && <SignoffEditor section={section} onUpdate={onUpdate} />}
       {template.type === "appendix" && <AppendixEditor section={section} onUpdate={onUpdate} />}
+    </div>
+  );
+}
+
+function UseCaseSuggestionPanel({ citations, isLoading, message, onAdd, onSuggest, suggestions }) {
+  const hasSuggestions = suggestions.length > 0;
+
+  return (
+    <div className="use-case-suggestion-card">
+      <div className="use-case-suggestion-head">
+        <span>
+          <GitBranch size={17} />
+          Use Case Suggestions
+        </span>
+        <button className="secondary-button compact-text" disabled={isLoading} onClick={onSuggest}>
+          <Sparkles size={15} />
+          {isLoading ? "Checking" : "Suggest"}
+        </button>
+      </div>
+      {hasSuggestions ? (
+        <div className="use-case-suggestion-list">
+          {suggestions.slice(0, 5).map((suggestion, index) => (
+            <article key={`${suggestion["Use Case"]}-${index}`}>
+              <div>
+                <strong>{suggestion["Use Case"] || "Suggested validation use case"}</strong>
+                <p>{suggestion.Description || "Validate this workflow against the agreed PoV evidence requirements."}</p>
+                <span>{suggestion["Product(s)"] || "Products to confirm"}</span>
+              </div>
+              <button className="secondary-button compact-text" onClick={() => onAdd(suggestion, index)}>
+                <Plus size={15} />
+                Add
+              </button>
+            </article>
+          ))}
+        </div>
+      ) : (
+        <p className="use-case-suggestion-empty">Suggest focused validation use cases from the customer context, products, and similar OPSWAT experience.</p>
+      )}
+      {message && <div className={`use-case-suggestion-message ${message.includes("failed") || message.includes("unavailable") || message.includes("not configured") ? "error" : ""}`}>{message}</div>}
+      {citations.length > 0 && (
+        <details className="citation-drawer compact-citations">
+          <summary>{citations.length} evidence reference(s)</summary>
+          <div>
+            {citations.slice(0, 4).map((citation, index) => (
+              <article key={`${citation.title}-${index}`}>
+                <strong>{citation.type || "Source"}</strong>
+                <p>{citation.title}</p>
+              </article>
+            ))}
+          </div>
+        </details>
+      )}
     </div>
   );
 }
@@ -1072,7 +1385,7 @@ function NarrativeEditor({ section, onUpdate }) {
   );
 }
 
-function TableSectionEditor({ section, onUpdate }) {
+function TableSectionEditor({ onRequestUseCaseSuggestions, section, onUpdate }) {
   const { template, data } = section;
   const isEngagementDetails = template.exportKey === "cover.engagementDetails";
   const gridTemplateColumns = isEngagementDetails
@@ -1088,6 +1401,9 @@ function TableSectionEditor({ section, onUpdate }) {
 
   function addRow() {
     onUpdate(section.id, (current) => ({ ...current, rows: [...current.rows, emptyRow(template.columns)] }));
+    if (template.exportKey === "sections.useCases") {
+      onRequestUseCaseSuggestions?.();
+    }
   }
 
   function removeRow(rowIndex) {
